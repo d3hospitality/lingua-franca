@@ -1,178 +1,183 @@
 {
   "language": {
+    "en": {
+      "name": "English",
+      "file": "/sprites/language/lang-en.png",
+      "generated": true
+    },
     "ar": {
       "name": "Arabic",
       "file": "/sprites/language/lang-ar.png",
-      "generated": false
+      "generated": true
     },
     "bg": {
       "name": "Bulgarian",
       "file": "/sprites/language/lang-bg.png",
-      "generated": false
+      "generated": true
     },
     "zh": {
       "name": "Chinese",
       "file": "/sprites/language/lang-zh.png",
-      "generated": false
+      "generated": true
     },
     "nl": {
       "name": "Dutch",
       "file": "/sprites/language/lang-nl.png",
-      "generated": false
+      "generated": true
     },
     "tl": {
       "name": "Filipino",
       "file": "/sprites/language/lang-tl.png",
-      "generated": false
+      "generated": true
     },
     "fr": {
       "name": "French",
       "file": "/sprites/language/lang-fr.png",
-      "generated": false
+      "generated": true
     },
     "de": {
       "name": "German",
       "file": "/sprites/language/lang-de.png",
-      "generated": false
+      "generated": true
     },
     "hi": {
       "name": "Hindi",
       "file": "/sprites/language/lang-hi.png",
-      "generated": false
+      "generated": true
     },
     "id": {
       "name": "Indonesian",
       "file": "/sprites/language/lang-id.png",
-      "generated": false
+      "generated": true
     },
     "it": {
       "name": "Italian",
       "file": "/sprites/language/lang-it.png",
-      "generated": false
+      "generated": true
     },
     "ja": {
       "name": "Japanese",
       "file": "/sprites/language/lang-ja.png",
-      "generated": false
+      "generated": true
     },
     "ko": {
       "name": "Korean",
       "file": "/sprites/language/lang-ko.png",
-      "generated": false
+      "generated": true
     },
     "pl": {
       "name": "Polish",
       "file": "/sprites/language/lang-pl.png",
-      "generated": false
+      "generated": true
     },
     "pt": {
       "name": "Portuguese",
       "file": "/sprites/language/lang-pt.png",
-      "generated": false
+      "generated": true
     },
     "ru": {
       "name": "Russian",
       "file": "/sprites/language/lang-ru.png",
-      "generated": false
+      "generated": true
     },
     "es": {
       "name": "Spanish",
       "file": "/sprites/language/lang-es.png",
-      "generated": false
+      "generated": true
     },
     "sv": {
       "name": "Swedish",
       "file": "/sprites/language/lang-sv.png",
-      "generated": false
+      "generated": true
     },
     "th": {
       "name": "Thai",
       "file": "/sprites/language/lang-th.png",
-      "generated": false
+      "generated": true
     },
     "tr": {
       "name": "Turkish",
       "file": "/sprites/language/lang-tr.png",
-      "generated": false
+      "generated": true
     },
     "vi": {
       "name": "Vietnamese",
       "file": "/sprites/language/lang-vi.png",
-      "generated": false
+      "generated": true
     }
   },
   "scene": {
     "social": {
       "name": "Social & Gathering",
       "file": "/sprites/scene/scene-social.png",
-      "generated": false
+      "generated": true
     },
     "food": {
       "name": "Food & Drinks",
       "file": "/sprites/scene/scene-food.png",
-      "generated": false
+      "generated": true
     },
     "compliment": {
       "name": "Compliments",
       "file": "/sprites/scene/scene-compliment.png",
-      "generated": false
+      "generated": true
     },
     "navigate": {
       "name": "Navigation & Help",
       "file": "/sprites/scene/scene-navigate.png",
-      "generated": false
+      "generated": true
     },
     "formal": {
       "name": "Formal",
       "file": "/sprites/scene/scene-formal.png",
-      "generated": false
+      "generated": true
     },
     "custom": {
       "name": "Custom / Saved Scenes",
       "file": "/sprites/scene/scene-custom.png",
-      "generated": false
+      "generated": true
     }
   },
   "utility": {
     "favorite": {
       "name": "Favorite",
       "file": "/sprites/utility/utility-favorite.png",
-      "generated": false
+      "generated": true
     },
     "saved": {
       "name": "Saved",
       "file": "/sprites/utility/utility-saved.png",
-      "generated": false
+      "generated": true
     },
     "recent": {
       "name": "Recent",
       "file": "/sprites/utility/utility-recent.png",
-      "generated": false
+      "generated": true
     },
     "quiz": {
       "name": "Quiz",
       "file": "/sprites/utility/utility-quiz.png",
-      "generated": false
+      "generated": true
     },
     "home": {
       "name": "Home",
       "file": "/sprites/utility/utility-home.png",
-      "generated": false
+      "generated": true
     },
     "compose": {
       "name": "Compose",
       "file": "/sprites/utility/utility-compose.png",
-      "generated": false
+      "generated": true
     },
     "push": {
       "name": "Push to Glasses",
       "file": "/sprites/utility/utility-push.png",
-      "generated": false
+      "generated": true
     },
     "search": {
       "name": "Search",
       "file": "/sprites/utility/utility-search.png",
-      "generated": false
+      "generated": true
     }
   }
 }
