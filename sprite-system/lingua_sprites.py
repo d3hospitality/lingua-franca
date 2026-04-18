@@ -476,82 +476,43 @@ def approve_system_master():
 # CATEGORY TEMPLATE GENERATION
 # ══════════════════════════════════════════════════════════════════
 
-# For language the category "master" is specifically the FLAG STYLE MASTER —
-# a flag-as-clothing exemplar. This is the soPHICON-pipeline analogue to a
-# "master_<pose>.png" (flag-clothing is the universal "pose" for language).
-CATEGORY_MASTER_FILENAME = {
-    "language": "master_flag.png",
-    "scene":    "master_scene.png",
-    "utility":  "master_utility.png",
-}
-CATEGORY_CANDIDATE_FILENAME = {
-    "language": "candidate_flag.png",
-    "scene":    "candidate_scene.png",
-    "utility":  "candidate_utility.png",
-}
-
 CATEGORY_TEMPLATE_PROMPTS = {
-    "language": """Now generate the WORLD FLAG STYLE MASTER — the universal exemplar for
-every language-portrait that will follow. Canvas rules:
-- Take the SAME blank traveler from the master neutral (same face, same pose, same head
-  size, same 3/4 angle, same upper-left key light, same canvas position)
-- REPLACE the gray placeholder garment with a generic FANTASY FLAG rendered AS CLOTHING:
-  a simple three-stripe banner (three horizontal bands in three invented muted colors —
-  think desaturated teal / cream / ochre) draped as a high-collared tunic or sash across
-  the shoulders. A single invented ornamental emblem (a small geometric sun-and-crescent
-  shape) is centered on the chest where flag insignia would sit.
-- Background stays pure black.
-- This is NOT a real country. It's the canonical EXAMPLE of "how a flag becomes clothing"
-  in the Lingua Franca pixel portrait style — the pattern/layout exemplar every real
-  language sprite will inherit from.
-- Painterly pixel rendering, GBA-era palette, visible brushstrokes on the fabric folds,
-  crisp edges.""",
-    "scene": """Now generate the SCENE ICON STYLE MASTER — a generic scene icon exemplar.
-A tight symbolic composition of 2-3 objects grouped together — think: "game inventory
-category icon." Pick a generic composition (a scroll, a quill, and a single spark,
-grouped centered) filling ~55% of canvas. Same rendering and lighting as the master
-dummy. Clean silhouette, high negative space. This is the style template every real
-scene icon will reference.""",
-    "utility": """Now generate the UTILITY GLYPH STYLE MASTER — a generic toolbar glyph.
-A single clean symbol with high negative space — think: "premium app toolbar icon."
-Pick a generic glyph (a sparkle/asterisk with a tiny orbit ring) centered on black,
-filling ~50% of canvas. Same rendering and lighting as the master dummy. This is the
-style template every real utility glyph will reference.""",
+    "language": """Now generate a generic LANGUAGE SPRITE EXEMPLAR in the same visual language:
+A small country-landmark silhouette composition — think: "landmark + cultural motif fused into a single framed vignette." Pick a generic fantasy landmark (a domed tower beside a stylized tree) centered on black background, filling ~65% of canvas. Same stroke weight and contrast as the master template. Clean silhouette, instantly readable at small sizes. This is NOT a final language sprite — it's the style template every real language sprite will reference.""",
+    "scene": """Now generate a generic SCENE ICON EXEMPLAR in the same visual language:
+A tight symbolic composition of 2-3 objects grouped together — think: "game inventory category icon." Pick a generic composition (a scroll, a quill, and a single spark, grouped centered) filling ~55% of canvas. Same stroke weight and contrast as the master template. Clean silhouette, high negative space. This is the style template every real scene icon will reference.""",
+    "utility": """Now generate a generic UTILITY GLYPH EXEMPLAR in the same visual language:
+A single clean symbol with high negative space — think: "premium app toolbar icon." Pick a generic glyph (a sparkle/asterisk with a tiny orbit ring) centered on black, filling ~50% of canvas. Same stroke weight and contrast as the master template. This is the style template every real utility glyph will reference.""",
 }
 
 
 def generate_category_template(category, api_key):
     master = TEMPLATE_DIR / "master_neutral.png"
     if not master.exists():
-        return None, "Master neutral not approved yet"
+        return None, "Master template not approved yet"
     body = CATEGORY_TEMPLATE_PROMPTS.get(category)
-    cand_name = CATEGORY_CANDIDATE_FILENAME.get(category)
-    if not body or not cand_name:
+    if not body:
         return None, f"Unknown category: {category}"
     prompt = f"""{SYSTEM_STYLE}
 
-IMAGE 1 is the MASTER NEUTRAL DUMMY (the blank traveler). Match its exact pose,
-head size, 3/4 angle, canvas position, lighting, and art style precisely.
+IMAGE 1 is the MASTER STYLE TEMPLATE (the Traveler's Compass). Match its
+exact pixel art style, lighting, contrast, and rendering quality.
 
 {body}"""
     img_bytes, err = call_openai_image(prompt, api_key, ref_paths=[str(master)])
     if err:
         return None, err
-    path = TEMPLATE_DIR / cand_name
+    path = TEMPLATE_DIR / f"candidate_{category}.png"
     with open(path, "wb") as f:
         f.write(img_bytes)
     return str(path), None
 
 
 def approve_category_template(category):
-    cand_name = CATEGORY_CANDIDATE_FILENAME.get(category)
-    dest_name = CATEGORY_MASTER_FILENAME.get(category)
-    if not cand_name or not dest_name:
-        return False, f"Unknown category: {category}"
-    cand = TEMPLATE_DIR / cand_name
+    cand = TEMPLATE_DIR / f"candidate_{category}.png"
     if not cand.exists():
         return False, f"No candidate for {category}"
-    dest = TEMPLATE_DIR / dest_name
+    dest = TEMPLATE_DIR / f"master_{category}.png"
     shutil.copy2(cand, dest)
     return True, str(dest)
 
@@ -560,32 +521,13 @@ def approve_category_template(category):
 # INDIVIDUAL SPRITE GENERATION
 # ══════════════════════════════════════════════════════════════════
 
-def _language_prompts(item, ref_desc_has_master, ref_desc_has_flag_master, ref_desc_has_subject_refs):
+def _language_prompts(item, ref_desc_has_master, ref_desc_has_subject_refs):
     """Portrait-style prompt where flag becomes clothing, landmark becomes backdrop.
-    Returns a list of prompt variants: primary, then alt_motifs in order.
-
-    Reference stack (soPHICON-style):
-      IMAGE 1 = master_neutral (blank traveler identity)
-      IMAGE 2 = master_flag    (flag-as-clothing pose anchor — "world flag master")
-      IMAGE 3+ = subject refs  (this country's flag, landmark, patterns)
-    """
-    # Compute image indices based on what exists
-    img_idx = 1
-    parts = []
-    if ref_desc_has_master:
-        parts.append(f"IMAGE {img_idx} is the MASTER NEUTRAL DUMMY — a blank Player-1 traveler portrait. Match EXACTLY: face, pose, head size, 3/4 angle, canvas position, lighting, art style. IGNORE its placeholder gray garment — you are REPLACING it with flag-derived clothing.")
-        img_idx += 1
-    if ref_desc_has_flag_master:
-        parts.append(f"IMAGE {img_idx} is the WORLD FLAG STYLE MASTER — the canonical exemplar for how a flag becomes clothing in this style. Match its fabric-rendering approach, stripe geometry, emblem placement, and painterly texture — but substitute THIS country's palette and symbols.")
-        img_idx += 1
-    if ref_desc_has_subject_refs:
-        parts.append(f"IMAGE {img_idx}+ are real-world REFERENCES for this country (flag, landmark, patterns). Use them for COLOR PALETTE, FLAG GEOMETRY, and LANDMARK SHAPE — but render everything in the master art style, never photographic.")
-
-    ref_block = "\n".join(parts)
-
+    Returns a list of prompt variants: primary, then alt_motifs in order."""
     header = f"""{SYSTEM_STYLE}
 
-{ref_block}
+{'IMAGE 1 is the MASTER NEUTRAL DUMMY — a blank Player-1 traveler portrait. Match EXACTLY: pose, head size, 3/4 angle, canvas position, lighting, art style. IGNORE its placeholder gray garment — you are REPLACING it with the flag-derived clothing below.' if ref_desc_has_master else ''}
+{'IMAGES 2+ are real-world REFERENCES for this country (flag, landmark, patterns). Use them for COLOR PALETTE, FLAG GEOMETRY, and LANDMARK SHAPE — but render everything in the master art style, never photographic.' if ref_desc_has_subject_refs else ''}
 
 CHARACTER: The same blank traveler from the master dummy — same face, same head size, same pose, same lighting. The traveler does NOT change. What changes is the CLOTHING (derived from this country's flag) and the BACKGROUND MOTIF.
 
@@ -596,7 +538,7 @@ CRITICAL:
 - Same face as the master dummy (ambiguous, calm, neutral expression)
 - Same head size, same pose, same 3/4 angle, same canvas placement
 - Same upper-left key light, same shadow pattern
-- Clothing replaces the master's gray placeholder garment, following the flag-master's fabric style
+- Clothing replaces the master's gray placeholder garment
 - Color palette pulls from the country's flag
 - Background landmark (if described) sits softly behind the figure, NEVER dominates
 - NO text, NO country name, NO captions anywhere"""
@@ -676,8 +618,8 @@ def _collect_subject_refs(category, sprite_id, max_refs=12):
 def generate_sprite(category, sprite_id, api_key):
     """Generate a single sprite using the multi-reference + alt-cycling pattern
     cribbed from soPHICON."""
-    master_neutral = TEMPLATE_DIR / "master_neutral.png"
-    cat_master = TEMPLATE_DIR / CATEGORY_MASTER_FILENAME.get(category, f"master_{category}.png")
+    master = TEMPLATE_DIR / "master_neutral.png"
+    cat_template = TEMPLATE_DIR / f"master_{category}.png"
 
     catalog = {"language": LANGUAGE_SPRITES,
                "scene": SCENE_SPRITES,
@@ -688,29 +630,20 @@ def generate_sprite(category, sprite_id, api_key):
     if not item:
         return None, f"Unknown {category} sprite: {sprite_id}"
 
-    # ── Assemble reference stack (soPHICON two-master pattern) ────
-    # LANGUAGE: [master_neutral (identity), master_flag (pose), subject refs (flag+landmark)]
-    # SCENE/UTIL: [master_cat (style), master_neutral (fallback only)]
+    # ── Assemble reference stack ──────────────────────────────────
     refs = []
-    if category == "language":
-        if master_neutral.exists():
-            refs.append(str(master_neutral))        # IMAGE 1 = identity anchor
-        if cat_master.exists():
-            refs.append(str(cat_master))            # IMAGE 2 = flag-style anchor
-    else:
-        if cat_master.exists():
-            refs.append(str(cat_master))
-        elif master_neutral.exists():
-            refs.append(str(master_neutral))
+    if master.exists():
+        refs.append(str(master))               # IMAGE 1 = master dummy
+    elif cat_template.exists():
+        refs.append(str(cat_template))
 
     subject_refs = _collect_subject_refs(category, sprite_id)
-    refs.extend(subject_refs)                       # IMAGES 3+ = subject refs
+    refs.extend(subject_refs)                  # IMAGES 2+ = subject refs
 
     # ── Build prompt variants ─────────────────────────────────────
     if category == "language":
         variants = _language_prompts(item,
-                                     ref_desc_has_master=master_neutral.exists(),
-                                     ref_desc_has_flag_master=cat_master.exists(),
+                                     ref_desc_has_master=master.exists(),
                                      ref_desc_has_subject_refs=bool(subject_refs))
     else:
         ref_desc = ("IMAGE 1 is the MASTER STYLE REFERENCE — match its art style, lighting, and rendering."
@@ -917,9 +850,7 @@ def api_assets():
     templates = {
         "master":   (TEMPLATE_DIR / "master_neutral.png").exists(),
         "candidate":(TEMPLATE_DIR / "candidate_master.png").exists(),
-        # Category masters (soPHICON-style pose anchors)
-        "flag":     (TEMPLATE_DIR / "master_flag.png").exists(),
-        "language": (TEMPLATE_DIR / "master_flag.png").exists(),   # alias for the UI
+        "language": (TEMPLATE_DIR / "master_language.png").exists(),
         "scene":    (TEMPLATE_DIR / "master_scene.png").exists(),
         "utility":  (TEMPLATE_DIR / "master_utility.png").exists(),
     }
