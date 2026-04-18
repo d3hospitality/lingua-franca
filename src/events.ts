@@ -24,7 +24,7 @@ import {
   fillSlotsHighlighted, fillSlotsRomHighlighted, fillSlotsPhonHighlighted, fillSlotsEnglishHighlighted,
   fillSlotsForSpeaker, fillSlotsForSpeakerHighlighted, getSpeakerSlotLabel,
   pickSlotsForTemplate, getSlotCategories, EN_TEMPLATES,
-  SCENARIO_GROUPS, HOME_MENU_ITEMS,
+  SCENARIO_GROUPS, HOME_MENU_ITEMS, phraseLabel,
   type GlassesQuizQuestion, type SlotCategory,
 } from './pages';
 import { pushHomeSprite, pushLangFlagSprite, pushGroupsSprite, pushPhrasesSprite, pushDialogueSprites, pushTextSprite } from './image-utils';
@@ -168,11 +168,11 @@ let langHighlightIdx = 0;
 let groupHighlightIdx = 0;
 let phraseHighlightIdx = 0;
 let lastSpriteUpdateMs = 0;
-const SPRITE_DEBOUNCE_MS = 150;  // don't re-push sprites faster than this
+const SPRITE_DEBOUNCE_MS = 100;  // don't re-push sprites faster than this
 
 let navigating = false;
 let lastNavigationTime = 0;
-const NAV_DEBOUNCE_MS = 500;
+const NAV_DEBOUNCE_MS = 150;  // minimal debounce — just enough to prevent double-fires
 
 // Mic / audio state
 let micActive = false;
@@ -212,7 +212,7 @@ async function goHome(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
   currentPhraseIdx = -1;
   quizQuestions = [];
   lastNavigationTime = Date.now();
-  await pushHomeSprite(bridge, baseUrl);
+  pushHomeSprite(bridge, baseUrl).catch(() => {});  // non-blocking
   log("< Back to Home", "success");
   notifyPageChange();
 }
@@ -227,7 +227,7 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
 
     if (currentPage === "detail" && currentLang && currentGroupIdx >= 0) {
       await bridge.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-      await pushPhrasesSprite(bridge, baseUrl, currentGroupIdx);
+      pushPhrasesSprite(bridge, baseUrl, currentGroupIdx).catch(() => {});
       currentPage = "phrases";
       currentPhraseIdx = -1;
       lastNavigationTime = Date.now();
@@ -236,7 +236,7 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
     else if (currentPage === "phrases" && currentLang) {
       groupHighlightIdx = 0;
       await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-      await pushGroupsSprite(bridge, baseUrl, currentLang);
+      pushGroupsSprite(bridge, baseUrl, currentLang).catch(() => {});
       currentPage = "groups";
       currentGroupIdx = -1;
       lastNavigationTime = Date.now();
@@ -337,6 +337,12 @@ function generateQuiz(lang: LangCode, count: number = 5): GlassesQuizQuestion[] 
   return questions;
 }
 
+// ═══ PUBLIC: simulate a glasses click from the webapp ═══
+export async function simulateGlassesClick(idx: number): Promise<void> {
+  if (!bridgeRef) return;
+  await handleClick(bridgeRef, idx, baseUrlRef);
+}
+
 // ═══ HANDLE CLICK ═══
 async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string): Promise<void> {
   if (navigating) return;
@@ -428,8 +434,8 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
           suggestions: ["Waiting for speech..."],
         }));
 
-        // Push language flag sprites for both speakers
-        await pushDialogueSprites(bridge, baseUrl, speakTargetLang!, speakLang);
+        // Push language flag sprites for both speakers (non-blocking)
+        pushDialogueSprites(bridge, baseUrl, speakTargetLang!, speakLang).catch(() => {});
 
         currentPage = "dialogue-hud";
         lastNavigationTime = Date.now();
@@ -467,7 +473,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentLang = LANG_CODES[idx];
         groupHighlightIdx = 0;
         await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-        await pushGroupsSprite(bridge, baseUrl, currentLang);
+        pushGroupsSprite(bridge, baseUrl, currentLang).catch(() => {});
         currentPage = "groups";
         lastNavigationTime = Date.now();
         log(`> ${LANG_LABEL[currentLang]}`, "success");
@@ -539,7 +545,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentGroupIdx = idx;
         phraseHighlightIdx = 0;
         await bridge.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-        await pushPhrasesSprite(bridge, baseUrl, currentGroupIdx);
+        pushPhrasesSprite(bridge, baseUrl, currentGroupIdx).catch(() => {});
         currentPage = "phrases";
         lastNavigationTime = Date.now();
         log(`> ${SCENARIO_GROUPS[idx].label}`, "success");
@@ -697,12 +703,16 @@ async function handleEvent(bridge: EvenAppBridge, event: EvenHubEvent, baseUrl: 
 
   // Audio events — PCM data from glasses 4-mic array (16kHz, 16-bit LE, mono)
   // Stream each chunk directly to listeners (Pulse handles buffering internally)
-  if ((event as any).audioEvent) {
-    const pcm = (event as any).audioEvent.audioPcm as Uint8Array;
-    if (pcm && pcm.length > 0 && micActive) {
-      // Forward every chunk immediately — Pulse STT streams in real-time
-      for (const cb of audioListeners) {
-        try { cb(pcm); } catch (e) { console.warn('[LF] Audio listener error:', e); }
+  // NOTE: SDK sends audioPcm as number[] after JSON serialization, not a real Uint8Array.
+  //       Always wrap with new Uint8Array() to ensure correct binary type.
+  if (event.audioEvent) {
+    const raw = event.audioEvent.audioPcm;
+    if (raw && micActive) {
+      const pcm = new Uint8Array(raw);  // convert number[] → real Uint8Array
+      if (pcm.length > 0) {
+        for (const cb of audioListeners) {
+          try { cb(pcm); } catch (e) { console.warn('[LF] Audio listener error:', e); }
+        }
       }
     }
     return;
@@ -841,13 +851,13 @@ export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseU
   if (currentPage === "groups" && currentLang) {
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-    await pushGroupsSprite(bridgeRef, baseUrlRef, currentLang);
+    pushGroupsSprite(bridgeRef, baseUrlRef, currentLang).catch(() => {});
     log(`Glasses updated → ${LANG_LABEL[currentLang]} groups`, "success");
   }
   else if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-    await pushPhrasesSprite(bridgeRef, baseUrlRef, currentGroupIdx);
+    pushPhrasesSprite(bridgeRef, baseUrlRef, currentGroupIdx).catch(() => {});
     log(`Glasses updated → ${LANG_LABEL[currentLang]} phrases`, "success");
   }
   else if (currentPage === "detail" && currentLang && detailKey) {
@@ -863,7 +873,7 @@ export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseU
     // On home: update state and rebuild home to confirm change
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(rebuildHomePage());
-    await pushHomeSprite(bridgeRef, baseUrl);
+    pushHomeSprite(bridgeRef, baseUrl).catch(() => {});
     log(`Language set → ${LANG_LABEL[currentLang]} (home refreshed)`, "success");
   }
   else {
@@ -980,8 +990,8 @@ export async function startDialogueHUD(targetLang: LangCode): Promise<void> {
     { containerID: 43, containerName: "dlg-tts-text", content: initialTranslation },
   ]);
 
-  // Push language flag sprites to #41 (their speech) and #44 (your speech)
-  await pushDialogueSprites(bridgeRef, baseUrlRef, targetLang, speakLang);
+  // Push language flag sprites to #41 (their speech) and #44 (your speech) — non-blocking
+  pushDialogueSprites(bridgeRef, baseUrlRef, targetLang, speakLang).catch(() => {});
 
   dialogueHUDReady = true;
   currentPage = "dialogue-hud";
@@ -1119,6 +1129,7 @@ function notifyPageChange(): void {
     state.langFlag = LANG_FLAG[code];
     state.spriteUrl = `${baseUrl}sprites/language/lang-${code}.png`;
     state.highlightIdx = langHighlightIdx;
+    state.listItems = LANG_CODES.map(c => `${LANG_FLAG[c]} ${LANG_LABEL[c]}`);
   }
   else if (currentPage === "groups" && currentLang) {
     // Sprite updates dynamically on scroll via groupHighlightIdx
@@ -1147,7 +1158,7 @@ function notifyPageChange(): void {
     state.groupIdx = currentGroupIdx;
     state.groupLabel = SCENARIO_GROUPS[currentGroupIdx]?.label;
     state.highlightIdx = phraseHighlightIdx;
-    state.listItems = SCENARIO_GROUPS[currentGroupIdx].keys.map(k => k);
+    state.listItems = SCENARIO_GROUPS[currentGroupIdx].keys.map(k => phraseLabel(k));
   }
   else if (currentPage === "detail" && currentLang && detailKey) {
     state.phraseKey = detailKey;

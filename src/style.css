@@ -399,6 +399,7 @@ textarea:focus { box-shadow: 0 0 0 2px var(--accent-dim); }
   width: 56px; height: 56px; border-radius: 12px; object-fit: cover;
   background: var(--bg-card-hover);
   flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 .glasses-activity-info { flex: 1; min-width: 0; }
 .glasses-activity-lang {
@@ -414,6 +415,10 @@ textarea:focus { box-shadow: 0 0 0 2px var(--accent-dim); }
   margin-top: 10px; padding-top: 10px;
   border-top: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 .glasses-activity-list .glasses-list-item {
   padding: 8px 12px; border-radius: 8px;
@@ -424,6 +429,13 @@ textarea:focus { box-shadow: 0 0 0 2px var(--accent-dim); }
 .glasses-activity-list .glasses-list-item.active {
   color: var(--highlight); font-weight: 600;
   background: var(--accent-dark);
+}
+/* Glasses tumbler card — reuse initTumbler() pattern */
+/* Carousel sprite — enlarged with glow */
+.glasses-activity-sprite.carousel-sprite {
+  width: 80px; height: 80px; border-radius: 14px;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--highlight) 20%, transparent);
+  transition: all 0.2s ease;
 }
 
 /* ── Speak HUD ── */

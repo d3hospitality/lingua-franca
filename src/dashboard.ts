@@ -21,7 +21,7 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, type GlassesPageState } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, simulateGlassesClick, type GlassesPageState } from './events';
 import { sendAudioChunk, onPulseResult, startPulseStream, stopPulseStream, flushAudioBuffer, setPulseKey, hasPulseKey, getPulseKey, type PulseResult } from './pulse-stt';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, getOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
@@ -411,59 +411,147 @@ function handleGlassesPageChange(state: GlassesPageState): void {
   if (indicator) indicator.style.display = '';
   if (pageEl) pageEl.textContent = PAGE_LABELS[state.page] || state.page;
 
-  // Language info
-  if (langEl) {
-    if (state.langLabel) {
-      langEl.textContent = `${state.langFlag || ''} ${state.langLabel}`;
-      langEl.style.display = '';
-    } else {
-      langEl.style.display = 'none';
-    }
-  }
+  // ── Tumbler pages: languages, groups, phrases ──
+  // Show a real tumbler card (same as I speak / Learning) with sprite that updates on scroll
+  const isTumblerPage = (state.page === 'languages' || state.page === 'groups' || state.page === 'phrases') && state.listItems && state.listItems.length > 0;
+  const tumblerCard = document.getElementById('glasses-tumbler-card');
+  const tumblerTitle = document.getElementById('glasses-tumbler-title');
 
-  // Sprite image
-  if (spriteEl) {
-    if (state.spriteUrl) {
-      spriteEl.src = state.spriteUrl;
-      spriteEl.alt = state.langLabel || '';
-      spriteEl.style.display = '';
-    } else if (state.lang) {
-      spriteEl.src = `${baseUrl}sprites/language/lang-${state.lang}.png`;
-      spriteEl.alt = state.langLabel || '';
-      spriteEl.style.display = '';
-    } else {
-      spriteEl.style.display = 'none';
-    }
-  }
+  if (isTumblerPage) {
+    // Show the tumbler card
+    if (tumblerCard) tumblerCard.style.display = '';
 
-  // Phrase detail (when on detail page)
-  if (detailArea) {
-    if (state.page === 'detail' && (state.speakText || state.learnText)) {
-      const speakEl = document.getElementById('glasses-detail-speak');
-      const learnEl = document.getElementById('glasses-detail-learn');
-      const romEl = document.getElementById('glasses-detail-rom');
-      if (speakEl) speakEl.textContent = state.speakText || '';
-      if (learnEl) learnEl.textContent = state.learnText || '';
-      if (romEl) {
-        romEl.textContent = state.romText || '';
-        romEl.style.display = state.romText ? '' : 'none';
+    // Set the title
+    if (tumblerTitle) {
+      if (state.page === 'languages') tumblerTitle.textContent = 'Languages';
+      else if (state.page === 'groups') tumblerTitle.textContent = 'Scenarios';
+      else if (state.page === 'phrases') tumblerTitle.textContent = state.groupLabel || 'Phrases';
+    }
+
+    // Initialize the tumbler only when the page type changes
+    const tumblerEl = document.getElementById('glasses-tumbler');
+    if (tumblerEl && tumblerEl.dataset.tumblerPage !== state.page) {
+      tumblerEl.dataset.tumblerPage = state.page;
+
+      // Build sprite URL function based on page type
+      const items = state.listItems!;
+      const spriteUrlFn = (idx: number): string => {
+        if (state.page === 'languages') {
+          const code = LANG_CODES[idx];
+          return SPRITE_LANGS.has(code)
+            ? `${BASE_URL}sprites/language/lang-${code}.png`
+            : `${BASE_URL}sprites/candidate_world.png`;
+        } else {
+          // groups + phrases: use scene sprites
+          const sceneMap: Record<number, string> = {
+            0: 'scene-social', 1: 'scene-food', 2: 'scene-compliment',
+            3: 'scene-navigate', 4: 'scene-formal',
+          };
+          const groupIdx = state.page === 'phrases' ? (state.groupIdx ?? 0) : idx;
+          const scene = sceneMap[groupIdx];
+          return scene
+            ? `${BASE_URL}sprites/scene/${scene}.png`
+            : `${BASE_URL}sprites/candidate_scene.png`;
+        }
+      };
+
+      initTumbler(
+        'glasses-tumbler',
+        'glasses-tumbler-sprite',
+        items.map((_, i) => String(i)),  // use indices as codes
+        (idxStr) => items[Number(idxStr)] || idxStr,
+        state.highlightIdx ?? 0,
+        async (idxStr) => {
+          const idx = Number(idxStr);
+          // Update sprite immediately
+          const sprImg = document.getElementById('glasses-tumbler-sprite') as HTMLImageElement;
+          if (sprImg) sprImg.src = spriteUrlFn(idx);
+          // Tell glasses to select this item
+          await simulateGlassesClick(idx);
+        },
+      );
+
+      // Override the sprite update to use our custom URL function
+      const sprImg = document.getElementById('glasses-tumbler-sprite') as HTMLImageElement;
+      if (sprImg) {
+        sprImg.src = spriteUrlFn(state.highlightIdx ?? 0);
+        sprImg.style.display = '';
       }
-      detailArea.style.display = '';
-    } else {
-      detailArea.style.display = 'none';
     }
-  }
 
-  // List items (groups, language list highlight, etc.)
-  if (listArea) {
-    if (state.listItems && state.listItems.length > 0) {
-      listArea.innerHTML = state.listItems.map((item, i) =>
-        `<div class="glasses-list-item${i === (state.highlightIdx ?? 0) ? ' active' : ''}">${escHtml(item)}</div>`
-      ).join('');
-      listArea.style.display = '';
-    } else {
-      listArea.style.display = 'none';
+    // Sync tumbler scroll position from glasses (when glasses scroll, update webapp)
+    const highlightIdx = state.highlightIdx ?? 0;
+    const tEl = document.getElementById('glasses-tumbler');
+    if (tEl) {
+      const ITEM_H = 36;
+      // Scroll to the highlighted item without triggering onChange
+      tEl.scrollTo({ top: highlightIdx * ITEM_H, behavior: 'smooth' });
+      tEl.querySelectorAll('.tumbler-item[data-idx]').forEach((el) => {
+        el.classList.toggle('selected', el.getAttribute('data-idx') === String(highlightIdx));
+      });
     }
+    // Update sprite from glasses state
+    const tSprImg = document.getElementById('glasses-tumbler-sprite') as HTMLImageElement;
+    if (tSprImg && state.spriteUrl) {
+      tSprImg.src = state.spriteUrl;
+    }
+
+    // Hide the old list area
+    if (listArea) listArea.style.display = 'none';
+
+  } else {
+    // Hide tumbler card
+    if (tumblerCard) tumblerCard.style.display = 'none';
+    const tEl = document.getElementById('glasses-tumbler');
+    if (tEl) delete tEl.dataset.tumblerPage;
+
+    // Non-tumbler pages — standard rendering
+
+    // Language info
+    if (langEl) {
+      if (state.langLabel) {
+        langEl.textContent = `${state.langFlag || ''} ${state.langLabel}`;
+        langEl.style.display = '';
+      } else {
+        langEl.style.display = 'none';
+      }
+    }
+
+    // Sprite image
+    if (spriteEl) {
+      if (state.spriteUrl) {
+        spriteEl.src = state.spriteUrl;
+        spriteEl.alt = state.langLabel || '';
+        spriteEl.style.display = '';
+      } else if (state.lang) {
+        spriteEl.src = `${baseUrl}sprites/language/lang-${state.lang}.png`;
+        spriteEl.alt = state.langLabel || '';
+        spriteEl.style.display = '';
+      } else {
+        spriteEl.style.display = 'none';
+      }
+    }
+
+    // Phrase detail (when on detail page)
+    if (detailArea) {
+      if (state.page === 'detail' && (state.speakText || state.learnText)) {
+        const speakEl = document.getElementById('glasses-detail-speak');
+        const learnEl = document.getElementById('glasses-detail-learn');
+        const romEl = document.getElementById('glasses-detail-rom');
+        if (speakEl) speakEl.textContent = state.speakText || '';
+        if (learnEl) learnEl.textContent = state.learnText || '';
+        if (romEl) {
+          romEl.textContent = state.romText || '';
+          romEl.style.display = state.romText ? '' : 'none';
+        }
+        detailArea.style.display = '';
+      } else {
+        detailArea.style.display = 'none';
+      }
+    }
+
+    // Hide list area on non-carousel pages
+    if (listArea) listArea.style.display = 'none';
   }
 
   // ── Sync webapp controls with glasses state ──
@@ -1162,6 +1250,16 @@ async function handleGlobalClick(e: Event): Promise<void> {
   if (!target) return;
 
   const action = target.dataset.action;
+
+  // Carousel item click — select a language or scenario group from the webapp
+  if (action === 'carousel-select') {
+    const idx = Number(target.dataset.carouselIdx);
+    if (!isNaN(idx)) {
+      await simulateGlassesClick(idx);
+      log(`Carousel → item ${idx}`);
+    }
+    return;
+  }
 
   // Save compose phrase
   if (action === 'save-phrase') {

@@ -408,7 +408,7 @@ export function buildScenarioGroupPage(lang: LangCode, speakLangCode?: string): 
 // ══════════════════════════════════════════════════════════════════
 
 /** Get a short English label for a phrase key */
-function phraseLabel(key: PhraseKey): string {
+export function phraseLabel(key: PhraseKey): string {
   const labels: Record<PhraseKey, string> = {
     flirty_hello: "Flirty hello",
     warm_hello: "Warm hello",

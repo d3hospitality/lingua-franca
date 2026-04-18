@@ -117,7 +117,7 @@ export function startPulseStream(): void {
     // Flush any chunks that arrived while connecting
     for (const chunk of pendingChunks) {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(chunk.buffer);
+        ws.send(chunk);
       }
     }
     pendingChunks = [];
@@ -241,7 +241,8 @@ export function sendAudioChunk(pcm: Uint8Array): void {
     chunkBuffer = chunkBuffer.slice(PULSE_CHUNK_SIZE);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(chunk.buffer);
+      // .slice() creates a new buffer — safe to send (no shared ArrayBuffer issues)
+      ws.send(chunk);
     } else if (ws && ws.readyState === WebSocket.CONNECTING) {
       // Buffer while connecting
       pendingChunks.push(chunk);
@@ -254,7 +255,7 @@ export function sendAudioChunk(pcm: Uint8Array): void {
 export function flushAudioBuffer(): void {
   if (chunkBuffer.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
     // Send whatever we have, even if < 4096
-    ws.send(chunkBuffer.buffer.slice(0, chunkBuffer.length));
+    ws.send(chunkBuffer.slice(0));  // .slice creates a clean copy
   }
   chunkBuffer = new Uint8Array(0);
 }
