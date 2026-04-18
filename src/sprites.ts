@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 export const LANG_SPRITE: Record<string, string> = {
+  "en": "/sprites/language/lang-en.png",
   "ar": "/sprites/language/lang-ar.png",
   "bg": "/sprites/language/lang-bg.png",
   "zh": "/sprites/language/lang-zh.png",

@@ -17,7 +17,7 @@ import {
 } from './constants';
 import {
   rebuildHomePage, buildLanguagesPage, buildLibraryPage, buildMotherTonguePage,
-  buildSpeakSelectPage, buildDialogueHUDPage,
+  buildSpeakSelectPage, buildDialogueHUDPage, LANG_PAGE_SPRITE,
   buildScenarioGroupPage, buildPhraseListPage,
   buildPhraseDetailPage, buildQuizQuestionPage, buildQuizFeedbackPage,
   buildQuizScorePage, fillSlots, fillSlotsRom, fillSlotsPhon, fillSlotsEnglish,
@@ -27,7 +27,7 @@ import {
   SCENARIO_GROUPS, HOME_MENU_ITEMS,
   type GlassesQuizQuestion, type SlotCategory,
 } from './pages';
-import { pushLogoToGlasses, pushTextSprite } from './image-utils';
+import { pushHomeSprite, pushLangFlagSprite, pushGroupsSprite, pushPhrasesSprite, pushDialogueSprites, pushTextSprite } from './image-utils';
 import { initSync, getSavedPhrases, recordQuizResult, getQuizStats } from './sync';
 import { getCustomSlots, cycleSlotOption, buildCustomPhrasePage } from './custom-phrase';
 import { initAdaptiveRender, smartUpdate, snapshotTextContainers, clearSnapshot, logRenderStats } from './adaptive-render';
@@ -163,6 +163,11 @@ function getDetailSlotLabels(lang: LangCode): string[] {
   });
 }
 
+// Language page scroll state — tracks which language is highlighted
+let langHighlightIdx = 0;
+let lastSpriteUpdateMs = 0;
+const SPRITE_DEBOUNCE_MS = 150;  // don't re-push sprites faster than this
+
 let navigating = false;
 let lastNavigationTime = 0;
 const NAV_DEBOUNCE_MS = 500;
@@ -194,8 +199,9 @@ async function goHome(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
   currentPhraseIdx = -1;
   quizQuestions = [];
   lastNavigationTime = Date.now();
-  await pushLogoToGlasses(bridge, baseUrl);
+  await pushHomeSprite(bridge, baseUrl);
   log("< Back to Home", "success");
+  notifyPageChange();
 }
 
 // ═══ GO BACK ═══
@@ -208,7 +214,7 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
 
     if (currentPage === "detail" && currentLang && currentGroupIdx >= 0) {
       await bridge.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-      await pushLangSprite(bridge, currentLang);
+      await pushPhrasesSprite(bridge, baseUrl, currentGroupIdx);
       currentPage = "phrases";
       currentPhraseIdx = -1;
       lastNavigationTime = Date.now();
@@ -216,16 +222,21 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
     }
     else if (currentPage === "phrases" && currentLang) {
       await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-      await pushLangSprite(bridge, currentLang);
+      await pushGroupsSprite(bridge, baseUrl, currentLang);
       currentPage = "groups";
       currentGroupIdx = -1;
       lastNavigationTime = Date.now();
       log("< Back to groups", "success");
     }
     else if (currentPage === "groups") {
-      // Back to languages page
-      await bridge.rebuildPageContainer(buildLanguagesPage());
-      await pushLogoToGlasses(bridge, baseUrl);
+      // Back to languages page with dynamic flag sprite
+      langHighlightIdx = 0;
+      await bridge.rebuildPageContainer(buildLanguagesPage(0));
+      pushLangFlagSprite(
+        bridge, LANG_CODES[0],
+        LANG_PAGE_SPRITE.containerID, "lang-sprite",
+        LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+      ).catch(() => {});
       currentPage = "languages";
       currentLang = null;
       currentGroupIdx = -1;
@@ -234,8 +245,13 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
     }
     else if (currentPage === "dialogue-hud") {
       // Back from live conversation → speak language select
-      await bridge.rebuildPageContainer(buildSpeakSelectPage());
-      await pushLogoToGlasses(bridge, baseUrl);
+      langHighlightIdx = 0;
+      await bridge.rebuildPageContainer(buildSpeakSelectPage(0));
+      pushLangFlagSprite(
+        bridge, LANG_CODES[0],
+        LANG_PAGE_SPRITE.containerID, "speak-sprite",
+        LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+      ).catch(() => {});
       currentPage = "speak-select";
       speakTargetLang = null;
       lastNavigationTime = Date.now();
@@ -264,15 +280,11 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
     log(`[BACK] ERROR: ${err}`, "error");
   } finally {
     navigating = false;
+    notifyPageChange();
   }
 }
 
-// ═══ PUSH LANGUAGE SPRITE ═══
-async function pushLangSprite(bridge: EvenAppBridge, lang: LangCode): Promise<void> {
-  const label = `${LANG_FLAG[lang]} ${LANG_LABEL[lang]}`;
-  // Render the language name as a text sprite into the image containers
-  await pushTextSprite(bridge, label, 3, "lang-sprite-top", 190, 95, 20);
-}
+// (pushLangTextSprite removed — replaced by pushGroupsSprite / pushPhrasesSprite)
 
 // ═══ QUIZ GENERATOR ═══
 function generateQuiz(lang: LangCode, count: number = 5): GlassesQuizQuestion[] {
@@ -318,15 +330,27 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
     if (currentPage === "home") {
       if (idx === 0) {
         // Speak — select the language of the person you're talking to
-        await bridge.rebuildPageContainer(buildSpeakSelectPage());
-        await pushLogoToGlasses(bridge, baseUrl);
+        langHighlightIdx = 0;
+        await bridge.rebuildPageContainer(buildSpeakSelectPage(0));
+        const speakInitCode = LANG_CODES[0];
+        pushLangFlagSprite(
+          bridge, speakInitCode,
+          LANG_PAGE_SPRITE.containerID, "speak-sprite",
+          LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+        ).catch(() => {});
         currentPage = "speak-select";
         lastNavigationTime = Date.now();
         log("> Speak: select language", "success");
       } else if (idx === 1) {
-        // Languages — phrase browsing
-        await bridge.rebuildPageContainer(buildLanguagesPage());
-        await pushLogoToGlasses(bridge, baseUrl);
+        // Languages — phrase browsing with dynamic flag sprite
+        langHighlightIdx = 0;
+        await bridge.rebuildPageContainer(buildLanguagesPage(0));
+        const langInitCode = LANG_CODES[0];
+        pushLangFlagSprite(
+          bridge, langInitCode,
+          LANG_PAGE_SPRITE.containerID, "lang-sprite",
+          LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+        ).catch(() => {});
         currentPage = "languages";
         lastNavigationTime = Date.now();
         log("> Languages", "success");
@@ -412,7 +436,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
       if (idx >= 0 && idx < LANG_CODES.length) {
         currentLang = LANG_CODES[idx];
         await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-        await pushLangSprite(bridge, currentLang);
+        await pushGroupsSprite(bridge, baseUrl, currentLang);
         currentPage = "groups";
         lastNavigationTime = Date.now();
         log(`> ${LANG_LABEL[currentLang]}`, "success");
@@ -483,7 +507,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
       if (idx >= 0 && idx < SCENARIO_GROUPS.length) {
         currentGroupIdx = idx;
         await bridge.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-        await pushLangSprite(bridge, currentLang);
+        await pushPhrasesSprite(bridge, baseUrl, currentGroupIdx);
         currentPage = "phrases";
         lastNavigationTime = Date.now();
         log(`> ${SCENARIO_GROUPS[idx].label}`, "success");
@@ -604,6 +628,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
     log(`[CLICK] ERROR: ${err}`, "error");
   } finally {
     navigating = false;
+    notifyPageChange();
   }
 }
 
@@ -630,6 +655,7 @@ async function handleScroll(
     );
     lastNavigationTime = Date.now();
     log(`Scroll ${direction} → ${key}`, "success");
+    notifyPageChange();
   }
   // Other pages: scroll is handled natively by list containers
 }
@@ -655,8 +681,49 @@ async function handleEvent(bridge: EvenAppBridge, event: EvenHubEvent, baseUrl: 
       }
     }
 
-    // Ignore scroll on list pages (native list handles it)
-    if (type === OsEventTypeList.SCROLL_TOP_EVENT || type === OsEventTypeList.SCROLL_BOTTOM_EVENT) return;
+    // On languages/speak-select pages, scroll = update the big sprite dynamically
+    if (type === OsEventTypeList.SCROLL_TOP_EVENT || type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+      if (currentPage === "languages" || currentPage === "speak-select") {
+        // Update highlight index from scroll direction
+        if (type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+          langHighlightIdx = Math.min(langHighlightIdx + 1, LANG_CODES.length - 1);
+        } else {
+          langHighlightIdx = Math.max(langHighlightIdx - 1, 0);
+        }
+
+        // Debounce sprite pushes — they involve image fetch + grayscale conversion
+        const now = Date.now();
+        if (now - lastSpriteUpdateMs >= SPRITE_DEBOUNCE_MS) {
+          lastSpriteUpdateMs = now;
+          const code = LANG_CODES[langHighlightIdx];
+          const flag = LANG_FLAG[code] || '';
+          const name = LANG_LABEL[code] || code;
+
+          // Push the flag sprite for the highlighted language dynamically
+          const containerName = currentPage === "speak-select" ? "speak-sprite" : "lang-sprite";
+          pushLangFlagSprite(
+            bridge, code,
+            LANG_PAGE_SPRITE.containerID, containerName,
+            LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+          ).catch(() => {});
+
+          // Update the text label via textContainerUpgrade (instant)
+          const spriteLabel = currentPage === "speak-select" ? `🗣 ${flag} ${name}` : `${flag} ${name}`;
+          const labelName = currentPage === "speak-select" ? "speak-name" : "lang-name";
+          bridge.textContainerUpgrade({
+            containerID: LANG_PAGE_SPRITE.labelID,
+            containerName: labelName,
+            contentOffset: 0,
+            contentLength: spriteLabel.length,
+            content: spriteLabel,
+          } as any).catch(() => {});
+
+          log(`Scroll → ${flag} ${name}`);
+          notifyPageChange();
+        }
+      }
+      return;
+    }
 
     // Debounce
     if (Date.now() - lastNavigationTime < NAV_DEBOUNCE_MS) return;
@@ -698,13 +765,13 @@ export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseU
   if (currentPage === "groups" && currentLang) {
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
-    await pushLangSprite(bridgeRef, currentLang);
+    await pushGroupsSprite(bridgeRef, baseUrlRef, currentLang);
     log(`Glasses updated → ${LANG_LABEL[currentLang]} groups`, "success");
   }
   else if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
-    await pushLangSprite(bridgeRef, currentLang);
+    await pushPhrasesSprite(bridgeRef, baseUrlRef, currentGroupIdx);
     log(`Glasses updated → ${LANG_LABEL[currentLang]} phrases`, "success");
   }
   else if (currentPage === "detail" && currentLang && detailKey) {
@@ -720,7 +787,7 @@ export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseU
     // On home: update state and rebuild home to confirm change
     currentLang = learnLang;
     await bridgeRef.rebuildPageContainer(rebuildHomePage());
-    await pushLogoToGlasses(bridgeRef, baseUrl);
+    await pushHomeSprite(bridgeRef, baseUrl);
     log(`Language set → ${LANG_LABEL[currentLang]} (home refreshed)`, "success");
   }
   else {
@@ -789,8 +856,13 @@ export async function pushPhraseToGlasses(
 /** Start Speak mode: push speak-select page to glasses, open from dashboard */
 export async function startSpeakSelect(): Promise<void> {
   if (!bridgeRef) { log("[SPEAK] No bridge", "error"); return; }
-  await bridgeRef.rebuildPageContainer(buildSpeakSelectPage());
-  await pushLogoToGlasses(bridgeRef, baseUrlRef);
+  langHighlightIdx = 0;
+  await bridgeRef.rebuildPageContainer(buildSpeakSelectPage(0));
+  pushLangFlagSprite(
+    bridgeRef, LANG_CODES[0],
+    LANG_PAGE_SPRITE.containerID, "speak-sprite",
+    LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrlRef,
+  ).catch(() => {});
   currentPage = "speak-select";
   lastNavigationTime = Date.now();
   log("> Speak: select language (from dashboard)", "success");
@@ -832,11 +904,17 @@ export async function startDialogueHUD(targetLang: LangCode): Promise<void> {
     { containerID: 43, containerName: "dlg-tts-text", content: initialTranslation },
   ]);
 
+  // Push language flag sprites to #41 (their speech) and #44 (your speech)
+  await pushDialogueSprites(bridgeRef, baseUrlRef, targetLang, speakLang);
+
   dialogueHUDReady = true;
   currentPage = "dialogue-hud";
   lastNavigationTime = Date.now();
   log(`> Dialogue HUD: ${langLabel} — mic active`, "success");
 }
+
+/** Track the last detected language so we only re-push sprite when it changes */
+let lastDetectedLang: string | null = null;
 
 /**
  * Update Dialogue HUD with new TTS translation and AI suggestions.
@@ -845,14 +923,31 @@ export async function startDialogueHUD(targetLang: LangCode): Promise<void> {
  *   - If only translation text changed → textContainerUpgrade (~20fps, no flicker)
  *   - If suggestions list changed (different count) → rebuildPageContainer (~5fps)
  *   - Engine decides automatically via smartUpdate()
+ *
+ * DYNAMIC SPRITES:
+ *   - If detectedLangCode changes (e.g. Whisper detects a language switch),
+ *     #41 sprite is re-pushed with the new language's cultural image
+ *   - #44 (your mother tongue) only changes if you change Settings
  */
 export async function updateDialogueHUD(
   translation: string,
   suggestions: string[],
+  detectedLangCode?: string,
 ): Promise<void> {
   if (!bridgeRef || !speakTargetLang) return;
-  const langLabel = LANG_LABEL[speakTargetLang];
-  const langFlag = LANG_FLAG[speakTargetLang];
+
+  // Use detected language if provided, otherwise fall back to the selected target
+  const effectiveLang = detectedLangCode || speakTargetLang;
+  const langLabel = LANG_LABEL[effectiveLang] || effectiveLang;
+  const langFlag = LANG_FLAG[effectiveLang] || '';
+
+  // If the detected language changed, update target (sprite is static candidate_language)
+  const langChanged = detectedLangCode && detectedLangCode !== lastDetectedLang;
+  if (langChanged) {
+    lastDetectedLang = detectedLangCode!;
+    speakTargetLang = detectedLangCode as LangCode;
+    log(`[HUD] Language switched → ${langFlag} ${langLabel}`, "success");
+  }
 
   const page = buildDialogueHUDPage({
     detectedLang: `${langFlag} ${langLabel}`,
@@ -865,12 +960,10 @@ export async function updateDialogueHUD(
   const mode = await smartUpdate({
     page,
     textUpdates: [
+      { containerID: 42, containerName: "dlg-lang-name", content: `${langFlag} ${langLabel}` },
       { containerID: 43, containerName: "dlg-tts-text", content: translation },
-      // Note: suggestion list (containerID 45) is a ListContainer, not text —
-      // list content changes always need a full rebuild.
-      // But the TTS text (containerID 43) updates instantly via text-upgrade.
     ],
-    forceRebuild: !dialogueHUDReady,
+    forceRebuild: !dialogueHUDReady || !!langChanged,
   });
 
   log(`[HUD] ${mode}: "${translation.slice(0, 35)}..." + ${suggestions.length} suggestions`);
@@ -880,6 +973,111 @@ export async function updateDialogueHUD(
 export async function endSpeakMode(): Promise<void> {
   if (!bridgeRef) return;
   speakTargetLang = null;
+  lastDetectedLang = null;
   await goHome(bridgeRef, baseUrlRef);
   log("< Speak mode ended", "success");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAGE STATE NOTIFICATIONS — broadcast to webapp for live mirroring
+// ═══════════════════════════════════════════════════════════════════
+
+export interface GlassesPageState {
+  page: Page;
+  lang?: string;        // current language code (if applicable)
+  langLabel?: string;   // human-readable language name
+  langFlag?: string;    // flag emoji
+  groupIdx?: number;    // scenario group index
+  groupLabel?: string;  // scenario group name
+  phraseKey?: string;   // current phrase key
+  speakText?: string;   // speaker text (en or mother tongue)
+  learnText?: string;   // learning text (native)
+  romText?: string;     // romanization
+  spriteUrl?: string;   // URL of the current image sprite
+  listItems?: string[]; // current list items on glasses
+  highlightIdx?: number; // which list item is highlighted
+}
+
+type PageChangeCallback = (state: GlassesPageState) => void;
+let pageChangeListeners: PageChangeCallback[] = [];
+
+/** Subscribe to glasses page state changes */
+export function onGlassesPageChange(cb: PageChangeCallback): () => void {
+  pageChangeListeners.push(cb);
+  return () => { pageChangeListeners = pageChangeListeners.filter(l => l !== cb); };
+}
+
+/** Broadcast current state to all listeners */
+function notifyPageChange(): void {
+  const baseUrl = baseUrlRef || import.meta.env.BASE_URL;
+  const state: GlassesPageState = { page: currentPage };
+
+  if (currentLang) {
+    state.lang = currentLang;
+    state.langLabel = LANG_LABEL[currentLang];
+    state.langFlag = LANG_FLAG[currentLang];
+  }
+
+  if (currentPage === "languages" || currentPage === "speak-select") {
+    const code = LANG_CODES[langHighlightIdx];
+    state.lang = code;
+    state.langLabel = LANG_LABEL[code];
+    state.langFlag = LANG_FLAG[code];
+    state.spriteUrl = `${baseUrl}sprites/language/lang-${code}.png`;
+    state.highlightIdx = langHighlightIdx;
+  }
+  else if (currentPage === "groups" && currentLang) {
+    state.spriteUrl = `${baseUrl}sprites/language/lang-${currentLang}.png`;
+    state.groupIdx = currentGroupIdx;
+    state.listItems = SCENARIO_GROUPS.map(g => g.label);
+  }
+  else if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
+    // Map group index to scene sprite
+    const sceneMap: Record<number, string> = {
+      0: 'scene-social', 1: 'scene-food', 2: 'scene-compliment',
+      3: 'scene-navigate', 4: 'scene-formal',
+    };
+    const sceneName = sceneMap[currentGroupIdx];
+    state.spriteUrl = sceneName
+      ? `${baseUrl}sprites/scene/${sceneName}.png`
+      : `${baseUrl}sprites/candidate_scene.png`;
+    state.groupIdx = currentGroupIdx;
+    state.groupLabel = SCENARIO_GROUPS[currentGroupIdx]?.label;
+  }
+  else if (currentPage === "detail" && currentLang && detailKey) {
+    state.phraseKey = detailKey;
+    state.speakText = detailEn;
+    state.learnText = detailNative;
+    state.romText = detailRom;
+  }
+  else if (currentPage === "home") {
+    state.spriteUrl = `${baseUrl}sprites/logo.png`;
+  }
+  else if (currentPage === "dialogue-hud" && speakTargetLang) {
+    state.lang = speakTargetLang;
+    state.langLabel = LANG_LABEL[speakTargetLang];
+    state.langFlag = LANG_FLAG[speakTargetLang];
+    state.spriteUrl = `${baseUrl}sprites/language/lang-${speakTargetLang}.png`;
+  }
+
+  for (const cb of pageChangeListeners) {
+    try { cb(state); } catch (e) { console.warn('[LF] Page change listener error:', e); }
+  }
+}
+
+// Inject notifyPageChange calls into critical navigation points
+// This is done by wrapping goHome and key navigation spots
+
+/** Get the current glasses page state (for initial sync on dashboard load) */
+export function getGlassesPageState(): GlassesPageState {
+  // Build and return current state without notifying
+  const baseUrl = baseUrlRef || import.meta.env.BASE_URL;
+  const state: GlassesPageState = { page: currentPage };
+  if (currentLang) {
+    state.lang = currentLang;
+    state.langLabel = LANG_LABEL[currentLang];
+    state.langFlag = LANG_FLAG[currentLang];
+  }
+  if (currentPage === "home") state.spriteUrl = `${baseUrl}sprites/logo.png`;
+  return state;
 }

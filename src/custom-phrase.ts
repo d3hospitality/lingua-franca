@@ -299,7 +299,7 @@ export function renderGlassesPreview(): void {
     let curY = 4;
 
     // Speaker label (indented)
-    const spkFlag = LANG_FLAG[speakLangCode] || '🇬🇧';
+    const spkFlag = LANG_FLAG[speakLangCode] || '🇺🇸';
     const spkName = LANG_LABEL[speakLangCode] || 'English';
     ctx.fillStyle = '#8b5cf6';
     ctx.font = 'bold 11px -apple-system, sans-serif';
@@ -334,7 +334,7 @@ export function renderGlassesPreview(): void {
     // No slots — centered bilingual display
     let curY = 20;
 
-    const spkFlag = LANG_FLAG[speakLangCode] || '🇬🇧';
+    const spkFlag = LANG_FLAG[speakLangCode] || '🇺🇸';
     const spkName = LANG_LABEL[speakLangCode] || 'English';
     ctx.fillStyle = '#8b5cf6';
     ctx.font = 'bold 12px -apple-system, sans-serif';
@@ -393,7 +393,7 @@ export function buildCustomPhrasePage(): RebuildPageContainer | null {
   const SPEAK_TEXT_H = Math.floor(textZone * 0.38);
   const LEARN_TEXT_H = textZone - SPEAK_TEXT_H;
 
-  const spkFlag = LANG_FLAG[speakLangCode] || '🇬🇧';
+  const spkFlag = LANG_FLAG[speakLangCode] || '🇺🇸';
   const spkName = LANG_LABEL[speakLangCode] || 'English';
   const learnDisplay = romText ? `${learnTextHL}\n${romText}` : learnTextHL;
 

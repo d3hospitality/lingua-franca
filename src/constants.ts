@@ -7,7 +7,7 @@
 // ── Language metadata ──
 
 export const LANG_CODES = [
-  "ar","bg","zh","nl","tl","fr","de","hi","id","it","ja","ko","pl","pt","ru","es","sv","th","tr","vi"
+  "en","ar","bg","zh","nl","tl","fr","de","hi","id","it","ja","ko","pl","pt","ru","es","sv","th","tr","vi"
 ] as const;
 export type LangCode = typeof LANG_CODES[number];
 
@@ -25,7 +25,7 @@ export const LANG_LABEL: Record<string, string> = {
 };
 
 export const LANG_FLAG: Record<string, string> = {
-  en:"🇬🇧",id:"🇮🇩",es:"🇪🇸",fr:"🇫🇷",ja:"🇯🇵",it:"🇮🇹",
+  en:"🇺🇸",id:"🇮🇩",es:"🇪🇸",fr:"🇫🇷",ja:"🇯🇵",it:"🇮🇹",
   zh:"🇨🇳",ko:"🇰🇷",ar:"🇸🇦",hi:"🇮🇳",pt:"🇧🇷",de:"🇩🇪",
   ru:"🇷🇺",th:"🇹🇭",tr:"🇹🇷",vi:"🇻🇳",tl:"🇵🇭",nl:"🇳🇱",sv:"🇸🇪",pl:"🇵🇱",bg:"🇧🇬",
   bn:"🇧🇩",ur:"🇵🇰",fa:"🇮🇷",sw:"🇰🇪",el:"🇬🇷",he:"🇮🇱",

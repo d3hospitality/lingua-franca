@@ -88,9 +88,15 @@ body::after {
 
 /* ── Masters strip ───────────────────────────────────────────── */
 .masters {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
   padding: 10px 24px; border-bottom: 1px solid var(--green-ghost);
   background: var(--black-card);
+}
+@media (max-width: 1100px) {
+  .masters { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 720px) {
+  .masters { grid-template-columns: repeat(2, 1fr); }
 }
 .master-tile {
   display: flex; align-items: center; gap: 10px;
@@ -112,6 +118,55 @@ body::after {
                 color: var(--green-dim); margin-bottom: 4px; }
 .master-tile.has .master-label { color: var(--green-mid); }
 .master-actions { display: flex; gap: 4px; }
+
+/* ── Scene Masters (secondary row) ───────────────────────────── */
+.scene-masters {
+  padding: 8px 24px 12px;
+  border-bottom: 1px solid var(--green-ghost);
+  background: var(--black-card);
+}
+.scene-masters-label {
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--green-ghost); margin-bottom: 6px;
+}
+.scene-masters-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+}
+@media (max-width: 900px) {
+  .scene-masters-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.sm-tile {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; background: var(--black);
+  border: 1px solid var(--green-ghost); border-radius: 2px;
+}
+.sm-tile.has { border-color: var(--green-dim); }
+.sm-thumb {
+  width: 34px; height: 34px; flex-shrink: 0; border-radius: 2px;
+  background: var(--black-card); border: 1px solid var(--green-ghost);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--green-ghost); font-size: 12px; overflow: hidden;
+}
+.sm-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.sm-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sm-name {
+  font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--green-dim); display: flex; align-items: center; gap: 6px;
+}
+.sm-tile.has .sm-name { color: var(--green-mid); }
+.sm-actions { display: flex; gap: 3px; }
+.sm-actions button {
+  font-family: var(--font-mono); font-size: 8px; padding: 2px 6px;
+  border: 1px solid var(--green-ghost); background: none;
+  color: var(--green-dim); border-radius: 2px; cursor: pointer;
+  letter-spacing: 0.5px; text-transform: uppercase; transition: all 0.15s;
+}
+.sm-actions button:hover { border-color: var(--gold); color: var(--gold); }
+.sm-actions button.primary { border-color: var(--green-dim); color: var(--green-bright); background: var(--green-ghost); }
+.sm-actions button.primary:hover { background: var(--green-dim); color: var(--black); }
+.sm-gear { background: none; border: 1px solid var(--green-ghost); color: var(--green-dim);
+           border-radius: 2px; padding: 0 4px; font-size: 10px; cursor: pointer; line-height: 1; }
+.sm-gear:hover { color: var(--gold); border-color: var(--gold); }
 
 /* ── Buttons ─────────────────────────────────────────────────── */
 .btn {
@@ -519,6 +574,24 @@ body::after {
       </div>
     </div>
   </div>
+  <div class="master-tile" id="mt-world">
+    <div class="master-thumb" id="mt-world-img">—</div>
+    <div class="master-info">
+      <div class="master-label" id="mt-world-label">World Master
+        <button class="master-gear" onclick="openSettings('world')" title="Edit name + prompt">⚙</button>
+      </div>
+      <div class="master-actions">
+        <button class="btn" onclick="genWorld()">Gen</button>
+        <button class="btn primary" onclick="approveWorld()">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCENE MASTERS (per-category archetypes) -->
+<div class="scene-masters" id="sceneMasters">
+  <div class="scene-masters-label">SCENE MASTERS · common templates per category</div>
+  <div class="scene-masters-grid" id="sceneMastersGrid"></div>
 </div>
 
 <!-- TABS + BATCH ACTIONS -->
@@ -635,6 +708,7 @@ const state = {
 const AUTO_SELECT_TOP_N = 8;             // how many results to auto-flag as candidates after a search
 
 const REGIONS = {
+  'Anglosphere':   ['en'],
   'Europe':        ['bg','de','es','fr','it','nl','pl','pt','ru','sv'],
   'East Asia':     ['zh','ja','ko'],
   'Southeast Asia':['id','th','tl','vi'],
@@ -745,8 +819,50 @@ async function refresh() {
   state.templates = d.templates;
   state.config = (cfg && cfg.config) || {};
   renderMasters();
+  renderSceneMasters();
   renderSidebar();
   if (state.active) await loadSelected();
+}
+
+const SCENE_MASTER_IDS = ['social','food','compliment','navigate','formal'];
+
+function renderSceneMasters() {
+  const grid = document.getElementById('sceneMastersGrid');
+  const cfg = state.config || {};
+  const tpls = state.templates || {};
+  grid.innerHTML = SCENE_MASTER_IDS.map(sid => {
+    const key = 'scene_' + sid;
+    const has = !!tpls[key];
+    const name = (cfg[key] && cfg[key].name) || `Scene · ${sid.charAt(0).toUpperCase() + sid.slice(1)}`;
+    const thumb = has
+      ? `<img src="/api/template/master_scene_${sid}.png?t=${Date.now()}">`
+      : '—';
+    return `<div class="sm-tile ${has?'has':''}">
+      <div class="sm-thumb">${thumb}</div>
+      <div class="sm-info">
+        <div class="sm-name">${name}
+          <button class="sm-gear" onclick="openSettings('scene_${sid}')" title="Edit name + prompt">⚙</button>
+        </div>
+        <div class="sm-actions">
+          <button onclick="genSceneMaster('${sid}')">Gen</button>
+          <button class="primary" onclick="approveSceneMaster('${sid}')">OK</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function genSceneMaster(sid) {
+  toast(`Generating scene master: ${sid}…`);
+  const d = await api(`/api/template/scene-master/${sid}/generate`, {},
+                      `Generating scene master ${sid}…`);
+  toast(d.ok ? `Scene master ${sid} candidate ready` : 'Error: ' + (d.msg || ''), !d.ok);
+  refresh();
+}
+async function approveSceneMaster(sid) {
+  const d = await api(`/api/template/scene-master/${sid}/approve`, {});
+  toast(d.ok ? `Scene master ${sid} approved` : 'Error: ' + (d.msg || ''), !d.ok);
+  refresh();
 }
 
 function renderMasters() {
@@ -758,6 +874,7 @@ function renderMasters() {
     language: { img: 'master_language.png', id: 'mt-flag',    tplKey: 'language' },
     scene:    { img: 'master_scene.png',    id: 'mt-scene',   tplKey: 'scene'    },
     utility:  { img: 'master_utility.png',  id: 'mt-utility', tplKey: 'utility'  },
+    world:    { img: 'master_world.png',    id: 'mt-world',   tplKey: 'world'    },
   };
   for (const [cfgKey, m] of Object.entries(map)) {
     const tile = document.getElementById(m.id);
@@ -1247,6 +1364,18 @@ async function approveCat(cat) {
   refresh();
 }
 
+async function genWorld() {
+  toast('Generating world master…');
+  const d = await api('/api/template/world/generate', {}, 'Generating world master…');
+  toast(d.ok ? 'World candidate ready — approve to lock' : 'Error: ' + (d.msg || ''), !d.ok);
+  refresh();
+}
+async function approveWorld() {
+  const d = await api('/api/template/world/approve', {});
+  toast(d.ok ? 'World master approved' : 'Error: ' + (d.msg || ''), !d.ok);
+  refresh();
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS MODAL (edit name + prompt per master)
 // ═══════════════════════════════════════════════════════════════
@@ -1256,10 +1385,16 @@ function openSettings(key) {
   settings.activeKey = key;
   const cfg = (state.config && state.config[key]) || {};
   const title = {
-    master:   'Master Dummy — Settings',
-    language: 'Flag Master — Settings',
-    scene:    'Scene Master — Settings',
-    utility:  'Utility Master — Settings',
+    master:            'Master Dummy — Settings',
+    language:          'Flag Master — Settings',
+    scene:             'Scene Master — Settings',
+    utility:           'Utility Master — Settings',
+    world:             'World Master — Settings',
+    scene_social:      'Scene · Social — Settings',
+    scene_food:        'Scene · Food — Settings',
+    scene_compliment:  'Scene · Compliment — Settings',
+    scene_navigate:    'Scene · Navigate — Settings',
+    scene_formal:      'Scene · Formal — Settings',
   }[key] || 'Master Settings';
   document.getElementById('settingsTitle').textContent = title;
 

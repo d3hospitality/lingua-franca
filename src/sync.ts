@@ -208,6 +208,7 @@ export interface AppSettings {
   motherTongue: string;  // "en" default
   showRomanization: boolean;
   quizDifficulty: "easy" | "medium" | "hard";
+  theme: string;  // "somni" default
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -215,6 +216,7 @@ export async function getSettings(): Promise<AppSettings> {
     motherTongue: "en",
     showRomanization: true,
     quizDifficulty: "medium",
+    theme: "somni",
   });
 }
 

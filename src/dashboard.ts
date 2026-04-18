@@ -21,7 +21,7 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, type GlassesPageState } from './events';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
 import { log } from './ui';
@@ -30,7 +30,8 @@ import { log } from './ui';
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 
-let activeTab = 'home';
+let activeSection = 'home';   // which glasses-driven section is showing
+let overlayOpen: string | null = null;  // 'compose' | 'settings' | null
 let activeLang: LangCode = 'ja';  // default target language
 
 // Compose state
@@ -41,6 +42,9 @@ let composeMode: 'template' | 'ai' = 'template';
 // Speak state
 let speakActive = false;
 let speakTargetLangCode: LangCode | null = null;
+
+// Current "I speak" language (tracked from tumbler — may be any I_SPEAK_CODES value)
+let currentSpeakLang: string = 'en';
 
 // Quiz phone state
 let phoneQuizActive = false;
@@ -53,64 +57,53 @@ let phoneQuizScore = 0;
 // ═══════════════════════════════════════════════════════════════════
 
 export function initDashboard(): void {
-  // Tab switching
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const target = (tab as HTMLElement).dataset.tab;
-      if (!target) return;
-      switchTab(target);
-    });
-  });
+  // Header icon toggles — Compose and Settings overlays
+  const composeBtn = document.getElementById('header-compose-btn');
+  const settingsBtn = document.getElementById('header-settings-btn');
+  if (composeBtn) composeBtn.addEventListener('click', () => toggleOverlay('compose'));
+  if (settingsBtn) settingsBtn.addEventListener('click', () => toggleOverlay('settings'));
 
-  // Language picker — "I speak" (input language) with native script names
-  const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement;
-  if (inputSelect) {
-    inputSelect.innerHTML = '';
-    I_SPEAK_CODES.forEach(code => {
-      const opt = document.createElement('option');
-      opt.value = code;
-      const flag = LANG_FLAG[code] || '';
+  // Language picker — "I speak" tumbler
+  initTumbler(
+    'input-lang-tumbler',
+    'input-lang-sprite',
+    I_SPEAK_CODES,
+    (code) => {
       const native = LANG_NATIVE[code] || LANG_LABEL[code] || code;
       const label = LANG_LABEL[code] || code;
-      // Show native name + English label for clarity (e.g. "🇯🇵 日本語 — Japanese")
-      opt.textContent = native === label ? `${flag} ${native}` : `${flag} ${native} — ${label}`;
-      if (code === 'en') opt.selected = true;
-      inputSelect.appendChild(opt);
-    });
-    inputSelect.addEventListener('change', async () => {
-      setSpeakLang(inputSelect.value);
-      setCustomSpeakLang(inputSelect.value);  // update custom phrase builder speak lang
-      setCustomLang(activeLang);  // refresh custom phrase builder
-      refreshHome();  // re-render quick scenarios with new speak language
-      refreshLibrary();  // re-translate saved phrases for new speak language
-      // Push update to glasses so they reflect the new "I speak" language
-      await refreshGlassesForLanguageChange(activeLang, 'https://d3hospitality.github.io/lingua-franca/');
-      log(`I speak: ${LANG_NATIVE[inputSelect.value] || inputSelect.value}`);
-    });
-  }
-
-  // Language picker — "Learning" (output language)
-  const outputSelect = document.getElementById('output-lang-select') as HTMLSelectElement;
-  if (outputSelect) {
-    LANG_CODES.forEach(code => {
-      const opt = document.createElement('option');
-      opt.value = code;
-      opt.textContent = `${LANG_FLAG[code]} ${LANG_LABEL[code]}`;
-      if (code === activeLang) opt.selected = true;
-      outputSelect.appendChild(opt);
-    });
-    outputSelect.addEventListener('change', async () => {
-      activeLang = outputSelect.value as LangCode;
-      setActiveLang(activeLang);
-      setLearnLang(activeLang);  // sync glasses state
+      return native === label ? native : `${native} — ${label}`;
+    },
+    I_SPEAK_CODES.indexOf('en'),
+    async (code) => {
+      currentSpeakLang = code;
+      setSpeakLang(code);
+      setCustomSpeakLang(code);
       setCustomLang(activeLang);
       refreshHome();
-      refreshLibrary();  // re-translate saved phrases for new language
-      // Push update to glasses so they reflect the new learning language
-      await refreshGlassesForLanguageChange(activeLang, 'https://d3hospitality.github.io/lingua-franca/');
+      refreshLibrary();
+      await refreshGlassesForLanguageChange(activeLang, import.meta.env.BASE_URL);
+      log(`I speak: ${LANG_NATIVE[code] || code}`);
+    },
+  );
+
+  // Language picker — "Learning" tumbler
+  initTumbler(
+    'output-lang-tumbler',
+    'output-lang-sprite',
+    LANG_CODES as unknown as string[],
+    (code) => LANG_LABEL[code] || code,
+    LANG_CODES.indexOf(activeLang),
+    async (code) => {
+      activeLang = code as LangCode;
+      setActiveLang(activeLang);
+      setLearnLang(activeLang);
+      setCustomLang(activeLang);
+      refreshHome();
+      refreshLibrary();
+      await refreshGlassesForLanguageChange(activeLang, import.meta.env.BASE_URL);
       log(`Language → ${LANG_LABEL[activeLang]}`);
-    });
-  }
+    },
+  );
 
   // Compose generate button (template-based)
   const genBtn = document.getElementById('compose-generate');
@@ -134,23 +127,100 @@ export function initDashboard(): void {
   // Custom phrase builder
   initCustomPhraseBuilder(activeLang);
 
+  // Theme picker
+  document.querySelectorAll('.theme-swatch').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const theme = (btn as HTMLElement).dataset.theme || 'somni';
+      document.body.dataset.theme = theme;
+      document.querySelectorAll('.theme-swatch').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      await saveSettings({ theme });
+      log(`Theme → ${theme}`);
+    });
+  });
+  // Restore saved theme on load
+  getSettings().then(s => {
+    if (s.theme) {
+      document.body.dataset.theme = s.theme;
+      document.querySelectorAll('.theme-swatch').forEach(b => {
+        b.classList.toggle('active', (b as HTMLElement).dataset.theme === s.theme);
+      });
+    }
+  });
+
+  // Subscribe to glasses page state changes — mirror on webapp
+  onGlassesPageChange(handleGlassesPageChange);
+
   // Global event delegation
   document.addEventListener('click', handleGlobalClick);
 }
 
-function switchTab(tab: string): void {
-  activeTab = tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelector(`.tab[data-tab="${tab}"]`)?.classList.add('active');
-  document.getElementById(`tab-${tab}`)?.classList.add('active');
+/** Show a glasses-driven section (home, speak, library, quiz, custom) */
+function showSection(section: string): void {
+  activeSection = section;
 
-  // Refresh tab content
-  if (tab === 'home') refreshHome();
-  else if (tab === 'speak') refreshSpeak();
-  else if (tab === 'custom') renderGlassesPreview();
-  else if (tab === 'library') refreshLibrary();
-  else if (tab === 'quiz') refreshQuiz();
+  // Close any open overlay
+  closeOverlay();
+
+  // Hide all tab-panels, show the target
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${section}`)?.classList.add('active');
+
+  // Update section label
+  const labelEl = document.getElementById('section-label-text');
+  if (labelEl) labelEl.textContent = SECTION_LABELS[section] || section;
+
+  // Refresh the section's content
+  if (section === 'home') refreshHome();
+  else if (section === 'speak') refreshSpeak();
+  else if (section === 'custom') renderGlassesPreview();
+  else if (section === 'library') refreshLibrary();
+  else if (section === 'quiz') refreshQuiz();
+}
+
+/** Section display names */
+const SECTION_LABELS: Record<string, string> = {
+  'home': 'Home',
+  'speak': 'Speak',
+  'library': 'Library',
+  'quiz': 'Quiz',
+  'custom': 'Custom Phrase',
+};
+
+/** Toggle an overlay panel (compose or settings) */
+function toggleOverlay(panel: string): void {
+  if (overlayOpen === panel) {
+    closeOverlay();
+    return;
+  }
+  closeOverlay();
+  overlayOpen = panel;
+
+  // Hide the current section, show the overlay
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const overlayEl = document.getElementById(`tab-${panel}`);
+  if (overlayEl) overlayEl.classList.add('active');
+
+  // Highlight the header button
+  document.getElementById(`header-${panel}-btn`)?.classList.add('active');
+
+  // Update section label
+  const labelEl = document.getElementById('section-label-text');
+  if (labelEl) labelEl.textContent = panel === 'compose' ? 'Compose' : 'Settings';
+}
+
+/** Close any open overlay and restore the glasses-driven section */
+function closeOverlay(): void {
+  if (!overlayOpen) return;
+  document.querySelectorAll('.overlay-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('header-compose-btn')?.classList.remove('active');
+  document.getElementById('header-settings-btn')?.classList.remove('active');
+  overlayOpen = null;
+
+  // Restore the current section
+  document.getElementById(`tab-${activeSection}`)?.classList.add('active');
+  const labelEl = document.getElementById('section-label-text');
+  if (labelEl) labelEl.textContent = SECTION_LABELS[activeSection] || activeSection;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -178,8 +248,193 @@ async function refreshHome(): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SPEAK TAB — Live Conversation Mode
+// GLASSES STATE — live sync of glasses page to webapp UI
 // ═══════════════════════════════════════════════════════════════════
+
+/** Page name labels for display */
+const PAGE_LABELS: Record<string, string> = {
+  'home': 'Home',
+  'languages': 'Languages',
+  'speak-select': 'Speak — Select Language',
+  'dialogue-hud': 'Live Conversation',
+  'groups': 'Scenario Groups',
+  'phrases': 'Phrase List',
+  'detail': 'Phrase Detail',
+  'library': 'Library',
+  'quiz-question': 'Quiz',
+  'quiz-feedback': 'Quiz — Feedback',
+  'quiz-score': 'Quiz — Score',
+  'custom': 'Custom Phrase',
+  'mother-tongue': 'Mother Tongue',
+};
+
+/** Map glasses page → webapp section */
+const PAGE_TO_SECTION: Record<string, string> = {
+  'home': 'home',
+  'languages': 'home',
+  'groups': 'home',
+  'phrases': 'home',
+  'detail': 'home',
+  'speak-select': 'speak',
+  'dialogue-hud': 'speak',
+  'library': 'library',
+  'quiz-question': 'quiz',
+  'quiz-feedback': 'quiz',
+  'quiz-score': 'quiz',
+  'custom': 'custom',
+  'mother-tongue': 'home',
+};
+
+function handleGlassesPageChange(state: GlassesPageState): void {
+  const baseUrl = import.meta.env.BASE_URL;
+
+  // ── Auto-switch webapp section to match glasses page ──
+  const targetSection = PAGE_TO_SECTION[state.page] || 'home';
+  if (targetSection !== activeSection && !overlayOpen) {
+    showSection(targetSection);
+  } else if (targetSection !== activeSection && overlayOpen) {
+    // Update the underlying section so closing the overlay shows the right one
+    activeSection = targetSection;
+  }
+
+  // Update section label with more specific page name
+  if (!overlayOpen) {
+    const labelEl = document.getElementById('section-label-text');
+    if (labelEl) labelEl.textContent = PAGE_LABELS[state.page] || SECTION_LABELS[targetSection] || state.page;
+  }
+
+  // ── Update the Glasses Activity card on Home tab ──
+  const badge = document.getElementById('glasses-page-badge');
+  const indicator = document.getElementById('glasses-live-indicator');
+  const pageEl = document.getElementById('glasses-activity-page');
+  const langEl = document.getElementById('glasses-activity-lang');
+  const spriteEl = document.getElementById('glasses-activity-sprite') as HTMLImageElement;
+  const detailArea = document.getElementById('glasses-activity-detail');
+  const listArea = document.getElementById('glasses-activity-list');
+
+  if (badge) badge.textContent = PAGE_LABELS[state.page] || state.page;
+  if (indicator) indicator.style.display = '';
+  if (pageEl) pageEl.textContent = PAGE_LABELS[state.page] || state.page;
+
+  // Language info
+  if (langEl) {
+    if (state.langLabel) {
+      langEl.textContent = `${state.langFlag || ''} ${state.langLabel}`;
+      langEl.style.display = '';
+    } else {
+      langEl.style.display = 'none';
+    }
+  }
+
+  // Sprite image
+  if (spriteEl) {
+    if (state.spriteUrl) {
+      spriteEl.src = state.spriteUrl;
+      spriteEl.alt = state.langLabel || '';
+      spriteEl.style.display = '';
+    } else if (state.lang) {
+      spriteEl.src = `${baseUrl}sprites/language/lang-${state.lang}.png`;
+      spriteEl.alt = state.langLabel || '';
+      spriteEl.style.display = '';
+    } else {
+      spriteEl.style.display = 'none';
+    }
+  }
+
+  // Phrase detail (when on detail page)
+  if (detailArea) {
+    if (state.page === 'detail' && (state.speakText || state.learnText)) {
+      const speakEl = document.getElementById('glasses-detail-speak');
+      const learnEl = document.getElementById('glasses-detail-learn');
+      const romEl = document.getElementById('glasses-detail-rom');
+      if (speakEl) speakEl.textContent = state.speakText || '';
+      if (learnEl) learnEl.textContent = state.learnText || '';
+      if (romEl) {
+        romEl.textContent = state.romText || '';
+        romEl.style.display = state.romText ? '' : 'none';
+      }
+      detailArea.style.display = '';
+    } else {
+      detailArea.style.display = 'none';
+    }
+  }
+
+  // List items (groups, language list highlight, etc.)
+  if (listArea) {
+    if (state.listItems && state.listItems.length > 0) {
+      listArea.innerHTML = state.listItems.map((item, i) =>
+        `<div class="glasses-list-item${i === (state.highlightIdx ?? 0) ? ' active' : ''}">${escHtml(item)}</div>`
+      ).join('');
+      listArea.style.display = '';
+    } else {
+      listArea.style.display = 'none';
+    }
+  }
+
+  // ── Sync webapp controls with glasses state ──
+
+  // Update the "Learning" tumbler if language changed from glasses
+  if (state.lang && state.lang !== activeLang && LANG_CODES.includes(state.lang as any)) {
+    activeLang = state.lang as LangCode;
+    setActiveLang(activeLang);
+    const tumblerEl = document.getElementById('output-lang-tumbler');
+    if (tumblerEl) {
+      const idx = LANG_CODES.indexOf(activeLang);
+      if (idx >= 0) {
+        tumblerEl.scrollTo({ top: idx * 36, behavior: 'smooth' });
+        tumblerEl.querySelectorAll('.tumbler-item[data-idx]').forEach((el) => {
+          el.classList.toggle('selected', el.getAttribute('data-idx') === String(idx));
+        });
+      }
+    }
+    const outputSprite = document.getElementById('output-lang-sprite') as HTMLImageElement;
+    if (outputSprite) {
+      outputSprite.src = `${baseUrl}sprites/language/lang-${activeLang}.png`;
+      outputSprite.alt = LANG_LABEL[activeLang] || activeLang;
+      outputSprite.style.display = '';
+    }
+  }
+
+  // If glasses entered speak/dialogue, sync phone speak tab
+  if (state.page === 'dialogue-hud' && state.lang && !speakActive) {
+    speakActive = true;
+    speakTargetLangCode = state.lang as LangCode;
+    const selectCard = document.getElementById('speak-select-card');
+    const hud = document.getElementById('speak-hud');
+    if (selectCard) selectCard.style.display = 'none';
+    if (hud) hud.style.display = '';
+    const theirLangEl = document.getElementById('speak-their-lang');
+    const theirSprite = document.getElementById('speak-their-sprite') as HTMLImageElement;
+    if (theirLangEl) theirLangEl.textContent = state.langLabel || '';
+    if (theirSprite && state.lang) {
+      theirSprite.src = SPRITE_LANGS.has(state.lang)
+        ? `${baseUrl}sprites/language/lang-${state.lang}.png`
+        : `${baseUrl}sprites/candidate_language.png`;
+    }
+  }
+
+  // If glasses left dialogue, reset speak state
+  if ((state.page === 'home' || state.page === 'speak-select') && speakActive) {
+    speakActive = false;
+    speakTargetLangCode = null;
+    const selectCard = document.getElementById('speak-select-card');
+    const hud = document.getElementById('speak-hud');
+    if (selectCard) selectCard.style.display = '';
+    if (hud) hud.style.display = 'none';
+  }
+
+  // Refresh library if glasses navigated there
+  if (state.page === 'library' && activeSection === 'library') {
+    refreshLibrary();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SPEAK TAB — Live Conversation Mode
+// Mirrors the G2 glasses Dialogue HUD on the phone in real-time
+// ═══════════════════════════════════════════════════════════════════
+
+const SPEAK_BASE_URL = import.meta.env.BASE_URL;
 
 function initSpeakTab(): void {
   // Populate language picker
@@ -204,7 +459,6 @@ function initSpeakTab(): void {
 }
 
 function refreshSpeak(): void {
-  // If speak is active, make sure HUD is visible
   const selectCard = document.getElementById('speak-select-card');
   const hud = document.getElementById('speak-hud');
   if (selectCard) selectCard.style.display = speakActive ? 'none' : '';
@@ -218,25 +472,33 @@ async function handleSpeakStart(): Promise<void> {
   speakTargetLangCode = langSelect.value as LangCode;
   speakActive = true;
 
-  // Update phone UI
+  // Update phone UI — show HUD, hide selector
   const selectCard = document.getElementById('speak-select-card');
   const hud = document.getElementById('speak-hud');
   if (selectCard) selectCard.style.display = 'none';
   if (hud) hud.style.display = '';
 
-  // Set language labels
-  const theirFlag = document.getElementById('speak-their-flag');
-  const theirLang = document.getElementById('speak-their-lang');
-  if (theirFlag) theirFlag.textContent = LANG_FLAG[speakTargetLangCode] || '';
-  if (theirLang) theirLang.textContent = LANG_LABEL[speakTargetLangCode] || speakTargetLangCode;
+  // Set their language info
+  const theirLangEl = document.getElementById('speak-their-lang');
+  const theirSprite = document.getElementById('speak-their-sprite') as HTMLImageElement;
+  if (theirLangEl) theirLangEl.textContent = LANG_LABEL[speakTargetLangCode] || speakTargetLangCode;
+  if (theirSprite) {
+    theirSprite.src = SPRITE_LANGS.has(speakTargetLangCode)
+      ? `${SPEAK_BASE_URL}sprites/language/lang-${speakTargetLangCode}.png`
+      : `${SPEAK_BASE_URL}sprites/candidate_language.png`;
+    theirSprite.alt = LANG_LABEL[speakTargetLangCode] || '';
+  }
 
-  // Set user language
-  const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement;
-  const userLangCode = (inputSelect?.value || 'en') as LangCode;
-  const yourFlag = document.getElementById('speak-your-flag');
-  const yourLang = document.getElementById('speak-your-lang');
-  if (yourFlag) yourFlag.textContent = LANG_FLAG[userLangCode] || '🇬🇧';
-  if (yourLang) yourLang.textContent = LANG_LABEL[userLangCode] || 'English';
+  // Set your language info
+  const yourLangEl = document.getElementById('speak-your-lang');
+  const yourSprite = document.getElementById('speak-your-sprite') as HTMLImageElement;
+  if (yourLangEl) yourLangEl.textContent = LANG_LABEL[currentSpeakLang] || 'English';
+  if (yourSprite) {
+    yourSprite.src = SPRITE_LANGS.has(currentSpeakLang)
+      ? `${SPEAK_BASE_URL}sprites/language/lang-${currentSpeakLang}.png`
+      : `${SPEAK_BASE_URL}sprites/candidate_master.png`;
+    yourSprite.alt = LANG_LABEL[currentSpeakLang] || 'English';
+  }
 
   // Initial TTS display
   const ttsEl = document.getElementById('speak-tts-text');
@@ -248,7 +510,7 @@ async function handleSpeakStart(): Promise<void> {
 
   // Push to glasses: dialogue HUD
   await startDialogueHUD(speakTargetLangCode);
-  log(`🗣 Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
+  log(`Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
 }
 
 async function handleSpeakStop(): Promise<void> {
@@ -263,15 +525,16 @@ async function handleSpeakStop(): Promise<void> {
 
   // Return glasses to home
   await endSpeakMode();
-  log('🗣 Speak: conversation ended');
+  log('Speak: conversation ended');
 }
 
 /**
  * Called externally (or by future mic/TTS pipeline) to update the HUD
  * with new translated text and AI-generated response suggestions.
+ * Updates BOTH the phone canvas + interactive panels AND the glasses.
  */
 export async function updateSpeakHUD(translation: string, suggestions: string[]): Promise<void> {
-  // Update phone UI
+  // Update phone interactive panels
   const ttsEl = document.getElementById('speak-tts-text');
   if (ttsEl) ttsEl.textContent = translation;
 
@@ -318,7 +581,7 @@ function renderQuickScenarios(): void {
         ${p.phon ? `<div style="font-size:0.6rem;color:var(--gold);opacity:0.85">🔊 ${escHtml(p.phon)}</div>` : ''}
         <div class="phrase-rom" style="font-size:0.6rem;opacity:0.6">${escHtml(p.group)}</div>
       </div>
-      <button class="btn-outline-sm" data-action="push-quick" data-key="${p.key}">→ G2</button>
+      <button class="btn-outline-sm" data-action="push-quick" data-key="${p.key}">G2</button>
     </div>
   `).join('');
 }
@@ -377,7 +640,7 @@ function renderComposePhrases(): void {
       </div>
       <div style="display:flex;flex-direction:column;gap:4px">
         <button class="btn-outline-sm" data-action="save-phrase" data-idx="${i}">Save</button>
-        <button class="btn-outline-sm" data-action="push-phrase" data-idx="${i}">→ G2</button>
+        <button class="btn-outline-sm" data-action="push-phrase" data-idx="${i}">G2</button>
       </div>
     </div>
   `).join('');
@@ -483,7 +746,7 @@ function renderAIPhrases(): void {
           ${slotBtns}
           <span style="flex:1"></span>
           <button class="btn-outline-sm" data-action="save-ai-phrase" data-idx="${i}">Save</button>
-          <button class="btn-outline-sm" data-action="push-ai-phrase" data-idx="${i}">→ G2</button>
+          <button class="btn-outline-sm" data-action="push-ai-phrase" data-idx="${i}">G2</button>
         </div>
       </div>
     `;
@@ -511,9 +774,8 @@ async function refreshLibrary(): Promise<void> {
   const container = document.getElementById('library-content');
   if (!container) return;
 
-  // Get current speak lang from the dropdown
-  const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement;
-  const currentSpeakLang = inputSelect?.value || 'en';
+  // Get current speak lang from tumbler state
+  const speakLang = currentSpeakLang;
 
   if (phrases.length === 0) {
     container.innerHTML = '<span class="muted">No saved phrases yet</span>';
@@ -535,7 +797,7 @@ async function refreshLibrary(): Promise<void> {
           <div class="muted" style="font-size:0.6rem;margin-top:2px">${LANG_FLAG[displayLang]} ${LANG_LABEL[displayLang]}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          <button class="btn-outline-sm" data-action="push-saved" data-id="${p.id}" data-retranslate="${retranslated ? '1' : ''}">→ G2</button>
+          <button class="btn-outline-sm" data-action="push-saved" data-id="${p.id}" data-retranslate="${retranslated ? '1' : ''}">G2</button>
           <button class="btn-outline-sm" data-action="delete-phrase" data-id="${p.id}">✕</button>
         </div>
       </div>
@@ -596,10 +858,10 @@ async function refreshQuiz(): Promise<void> {
     const content = document.getElementById('quiz-content');
     if (content) {
       content.innerHTML = `
-        <button id="quiz-start" class="btn-primary" data-action="start-quiz">Start Quiz</button>
-        <span class="muted">Quiz yourself on ${LANG_FLAG[activeLang]} ${LANG_LABEL[activeLang]} vocab</span>
-        <div style="margin-top:8px">
-          <button class="btn-secondary" data-action="quiz-glasses">Quiz on Glasses →</button>
+        <button id="quiz-start" class="btn-primary btn-hero" data-action="start-quiz">Start Quiz</button>
+        <p class="muted" style="margin-top:10px">Quiz yourself on ${LANG_FLAG[activeLang]} ${LANG_LABEL[activeLang]} vocab</p>
+        <div style="margin-top:10px">
+          <button class="btn-secondary" style="width:100%" data-action="quiz-glasses">Quiz on Glasses</button>
         </div>
       `;
     }
@@ -691,7 +953,7 @@ async function renderPhoneQuizScore(): Promise<void> {
       <div style="text-align:center;padding:16px 0">
         <div class="stat-value" style="font-size:2rem">${pct}%</div>
         <div class="muted" style="margin:8px 0">${phoneQuizScore}/${phoneQuizQuestions.length} correct — ${LANG_LABEL[activeLang]}</div>
-        <button class="btn-primary" data-action="start-quiz" style="margin-top:12px">Play Again</button>
+        <button class="btn-primary btn-hero" data-action="start-quiz" style="margin-top:12px">Play Again</button>
       </div>
     `;
   }
@@ -748,8 +1010,6 @@ async function handleGlobalClick(e: Event): Promise<void> {
     const phrases = await getSavedPhrases();
     const p = phrases.find(ph => ph.id === id);
     if (!p) return;
-    const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement;
-    const currentSpeakLang = inputSelect?.value || 'en';
     const retranslated = retranslateSavedPhrase(p.key, activeLang, currentSpeakLang);
     if (retranslated) {
       await pushPhraseToGlasses(activeLang, p.key, retranslated.en, retranslated.native, retranslated.rom);
@@ -800,8 +1060,8 @@ async function handleGlobalClick(e: Event): Promise<void> {
   if (action === 'quick-scenario') {
     const key = target.dataset.key as PhraseKey;
     if (!key) return;
-    // Switch to compose and generate for this key
-    switchTab('compose');
+    // Open compose overlay and generate for this key
+    toggleOverlay('compose');
     handleComposeGenerate();
   }
 
@@ -888,6 +1148,128 @@ export function setGlassesStatus(connected: boolean, battery?: number): void {
   } else {
     el.innerHTML = '<span class="muted">Glasses not connected</span>';
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TUMBLER — scroll-lock style language picker
+// Scroll snaps to items, dynamically updates sprite preview + glasses
+// ═══════════════════════════════════════════════════════════════════
+
+const BASE_URL = import.meta.env.BASE_URL;
+const SPRITE_LANGS = new Set([
+  'en','ar','bg','de','es','fr','hi','id','it','ja','ko',
+  'nl','pl','pt','ru','sv','th','tl','tr','vi','zh',
+]);
+
+function initTumbler(
+  tumblerId: string,
+  spriteId: string,
+  codes: string[],
+  labelFn: (code: string) => string,
+  initialIdx: number,
+  onChange: (code: string) => Promise<void>,
+): void {
+  const tumbler = document.getElementById(tumblerId);
+  const spriteImg = document.getElementById(spriteId) as HTMLImageElement | null;
+  if (!tumbler) return;
+
+  const ITEM_H = 36;
+  // Padding items so the first/last can scroll to center
+  const PAD_COUNT = Math.floor(120 / ITEM_H / 2);  // ~1-2 padding items
+
+  // Build items: padding + real items + padding
+  tumbler.innerHTML = '';
+  for (let i = 0; i < PAD_COUNT; i++) {
+    const pad = document.createElement('div');
+    pad.className = 'tumbler-item dimmed';
+    pad.style.height = `${ITEM_H}px`;
+    pad.innerHTML = '&nbsp;';
+    tumbler.appendChild(pad);
+  }
+  codes.forEach((code, i) => {
+    const item = document.createElement('div');
+    item.className = 'tumbler-item';
+    item.style.height = `${ITEM_H}px`;
+    item.dataset.code = code;
+    item.dataset.idx = String(i);
+    item.textContent = labelFn(code);
+    tumbler.appendChild(item);
+  });
+  for (let i = 0; i < PAD_COUNT; i++) {
+    const pad = document.createElement('div');
+    pad.className = 'tumbler-item dimmed';
+    pad.style.height = `${ITEM_H}px`;
+    pad.innerHTML = '&nbsp;';
+    tumbler.appendChild(pad);
+  }
+
+  // Scroll to initial position
+  const targetScroll = initialIdx * ITEM_H;
+  tumbler.scrollTop = targetScroll;
+
+  // Update sprite preview — always visible, fallback to candidate_world
+  function updateSprite(code: string): void {
+    if (!spriteImg) return;
+    if (SPRITE_LANGS.has(code)) {
+      spriteImg.src = `${BASE_URL}sprites/language/lang-${code}.png`;
+    } else {
+      spriteImg.src = `${BASE_URL}sprites/candidate_world.png`;
+    }
+    spriteImg.alt = LANG_LABEL[code] || code;
+    spriteImg.style.display = '';
+  }
+
+  updateSprite(codes[initialIdx] || codes[0]);
+
+  // Track selected index
+  let currentIdx = initialIdx;
+  let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  tumbler.addEventListener('scroll', () => {
+    // Calculate which item is centered
+    const scrollTop = tumbler.scrollTop;
+    const newIdx = Math.round(scrollTop / ITEM_H);
+    const clampedIdx = Math.max(0, Math.min(newIdx, codes.length - 1));
+
+    if (clampedIdx !== currentIdx) {
+      currentIdx = clampedIdx;
+      const code = codes[currentIdx];
+
+      // Update sprite preview immediately
+      updateSprite(code);
+
+      // Highlight the selected item
+      tumbler.querySelectorAll('.tumbler-item[data-idx]').forEach((el) => {
+        el.classList.toggle('selected', el.getAttribute('data-idx') === String(currentIdx));
+      });
+    }
+
+    // Debounce the actual selection callback (wait for scroll to settle)
+    if (scrollTimeout) clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      // Snap to exact position
+      tumbler.scrollTo({ top: currentIdx * ITEM_H, behavior: 'smooth' });
+      const code = codes[currentIdx];
+      onChange(code);
+    }, 200);
+  }, { passive: true });
+
+  // Also handle tap to select
+  tumbler.addEventListener('click', (e) => {
+    const target = (e.target as HTMLElement).closest('.tumbler-item[data-idx]') as HTMLElement | null;
+    if (!target) return;
+    const idx = Number(target.dataset.idx);
+    if (isNaN(idx)) return;
+    currentIdx = idx;
+    tumbler.scrollTo({ top: idx * ITEM_H, behavior: 'smooth' });
+    updateSprite(codes[idx]);
+    onChange(codes[idx]);
+  });
+
+  // Initial highlight
+  tumbler.querySelectorAll('.tumbler-item[data-idx]').forEach((el) => {
+    el.classList.toggle('selected', el.getAttribute('data-idx') === String(initialIdx));
+  });
 }
 
 // ═══ Utility ═══

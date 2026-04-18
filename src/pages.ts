@@ -47,13 +47,15 @@ const PANEL_BOT_Y = PANEL_TOP_Y + PANEL_HALF_H;      // 97
 const PANEL_TAG_Y = PANEL_BOT_Y + PANEL_HALF_H;       // 192
 
 // ══════════════════════════════════════════════════════════════════
-// HOME — 5 containers
-//   2 = language list (left side)
-//   3 = logo top (190×95)
-//   4 = logo bottom (190×95)
-//   5 = "Lingua Franca" tagline
-//   6 = "Real-world fluency" tagline
+// HOME — 4 containers
+//   2 = menu list (left side)
+//   3 = logo (single 190×144 — SDK max image height)
+//   5 = "Language / Done Different" tagline
+//   6 = "Speak / See / Connect" tagline
 // ══════════════════════════════════════════════════════════════════
+
+const LOGO_W = 190;
+const LOGO_H = 144;  // SDK max image height
 
 function homeContainers() {
   // Main menu: Languages, Library, Quiz — vertically centered
@@ -73,14 +75,9 @@ function homeContainers() {
     isEventCapture: 1,
   });
 
-  const logoTop = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 3, containerName: "logo-top",
-  });
-
-  const logoBottom = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 4, containerName: "logo-bottom",
+  const logo = new ImageContainerProperty({
+    xPosition: 336, yPosition: 48, width: 190, height: 144,
+    containerID: 3, containerName: "logo",
   });
 
   const tagLine1 = new TextContainerProperty({
@@ -97,26 +94,26 @@ function homeContainers() {
     isEventCapture: 0,
   });
 
-  return { menuList, logoTop, logoBottom, tagLine1, tagLine2 };
+  return { menuList, logo, tagLine1, tagLine2 };
 }
 
 export function buildHomePage(): CreateStartUpPageContainer {
   const c = homeContainers();
   return new CreateStartUpPageContainer({
-    containerTotalNum: 5,
+    containerTotalNum: 4,
     listObject: [c.menuList],
     textObject: [c.tagLine1, c.tagLine2],
-    imageObject: [c.logoTop, c.logoBottom],
+    imageObject: [c.logo],
   });
 }
 
 export function rebuildHomePage(): RebuildPageContainer {
   const c = homeContainers();
   return new RebuildPageContainer({
-    containerTotalNum: 5,
+    containerTotalNum: 4,
     listObject: [c.menuList],
     textObject: [c.tagLine1, c.tagLine2],
-    imageObject: [c.logoTop, c.logoBottom],
+    imageObject: [c.logo],
   });
 }
 
@@ -146,11 +143,17 @@ export function rebuildHomePage(): RebuildPageContainer {
 //   · Ring scroll to pick a response. Double-tap = dismiss / back.
 // ══════════════════════════════════════════════════════════════════
 
-export function buildSpeakSelectPage(): RebuildPageContainer {
+export function buildSpeakSelectPage(highlightIdx?: number): RebuildPageContainer {
   const listItems = [...LANG_LIST_ITEMS, BACK_LABEL];
 
+  const safeIdx = (highlightIdx !== undefined && highlightIdx >= 0 && highlightIdx < LANG_CODES.length)
+    ? highlightIdx : 0;
+  const code = LANG_CODES[safeIdx];
+  const flag = LANG_FLAG[code] || '';
+  const name = LANG_LABEL[code] || code;
+
   const langList = new ListContainerProperty({
-    xPosition: 2, yPosition: 2, width: 290, height: 254,
+    xPosition: 2, yPosition: 2, width: 290, height: 280,
     containerID: 2, containerName: "speak-lang-list",
     itemContainer: new ListItemContainerProperty({
       itemCount: listItems.length,
@@ -161,44 +164,65 @@ export function buildSpeakSelectPage(): RebuildPageContainer {
     isEventCapture: 1,
   });
 
-  const logoTop = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 3, containerName: "speak-logo-top",
+  // Big language sprite — same layout as Languages page
+  const langSprite = new ImageContainerProperty({
+    xPosition: LANG_SPRITE_X,
+    yPosition: LANG_SPRITE_Y,
+    width: LANG_SPRITE_W,
+    height: LANG_SPRITE_H,
+    containerID: 3,
+    containerName: "speak-sprite",
   });
 
-  const logoBottom = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 4, containerName: "speak-logo-bottom",
-  });
-
-  const hintText = new TextContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TAG_Y, width: 274, height: 50,
-    containerID: 5, containerName: "speak-hint",
-    content: "🗣 Select their language\nMic opens automatically",
+  const langLabel = new TextContainerProperty({
+    xPosition: LANG_SPRITE_X,
+    yPosition: LANG_LABEL_Y,
+    width: LANG_SPRITE_W,
+    height: LANG_LABEL_H,
+    containerID: 4,
+    containerName: "speak-name",
+    content: `🗣 ${flag} ${name}`,
     isEventCapture: 0,
   });
 
   return new RebuildPageContainer({
-    containerTotalNum: 4,
+    containerTotalNum: 3,
     listObject: [langList],
-    textObject: [hintText],
-    imageObject: [logoTop, logoBottom],
+    textObject: [langLabel],
+    imageObject: [langSprite],
   });
 }
 
 // ══════════════════════════════════════════════════════════════════
-// LANGUAGES PAGE — alphabetical language list
-//   2 = language list + Back (left side)
-//   3 = logo top
-//   4 = logo bottom
-//   5 = info text ("20 Languages")
+// LANGUAGES PAGE — scrollable list + large dynamic language sprite
+//   2 = language list + Back (left, narrow)
+//   3 = language sprite (right, as big as possible — updates on scroll)
+//   4 = language name label (below sprite)
+//
+// As user scrolls the list, the sprite + label update to show
+// whichever language is currently highlighted.
 // ══════════════════════════════════════════════════════════════════
 
-export function buildLanguagesPage(): RebuildPageContainer {
+// Right-side sprite: SDK max image is 288×144
+const LANG_SPRITE_X = 296;
+const LANG_SPRITE_Y = 4;
+const LANG_SPRITE_W = 272;   // fits right of the 290-wide list
+const LANG_SPRITE_H = 144;   // SDK max image height
+const LANG_LABEL_Y  = LANG_SPRITE_Y + LANG_SPRITE_H + 4;  // 152
+const LANG_LABEL_H  = 44;
+
+export function buildLanguagesPage(highlightIdx?: number): RebuildPageContainer {
   const listItems = [...LANG_LIST_ITEMS, BACK_LABEL];
 
+  // Figure out which language to show in the sprite
+  const safeIdx = (highlightIdx !== undefined && highlightIdx >= 0 && highlightIdx < LANG_CODES.length)
+    ? highlightIdx : 0;
+  const code = LANG_CODES[safeIdx];
+  const flag = LANG_FLAG[code] || '';
+  const name = LANG_LABEL[code] || code;
+
   const langList = new ListContainerProperty({
-    xPosition: 2, yPosition: 2, width: 290, height: 254,
+    xPosition: 2, yPosition: 2, width: 290, height: 280,
     containerID: 2, containerName: "lang-list",
     itemContainer: new ListItemContainerProperty({
       itemCount: listItems.length,
@@ -209,30 +233,45 @@ export function buildLanguagesPage(): RebuildPageContainer {
     isEventCapture: 1,
   });
 
-  const logoTop = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 3, containerName: "logo-top",
+  // Big language sprite — dynamically pushed via pushLangSprite()
+  const langSprite = new ImageContainerProperty({
+    xPosition: LANG_SPRITE_X,
+    yPosition: LANG_SPRITE_Y,
+    width: LANG_SPRITE_W,
+    height: LANG_SPRITE_H,
+    containerID: 3,
+    containerName: "lang-sprite",
   });
 
-  const logoBottom = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 4, containerName: "logo-bottom",
-  });
-
-  const infoText = new TextContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TAG_Y, width: 274, height: 50,
-    containerID: 5, containerName: "info",
-    content: `${LANG_LIST_ITEMS.length} Languages`,
+  // Language name label below the sprite
+  const langLabel = new TextContainerProperty({
+    xPosition: LANG_SPRITE_X,
+    yPosition: LANG_LABEL_Y,
+    width: LANG_SPRITE_W,
+    height: LANG_LABEL_H,
+    containerID: 4,
+    containerName: "lang-name",
+    content: `${flag} ${name}`,
     isEventCapture: 0,
   });
 
   return new RebuildPageContainer({
-    containerTotalNum: 4,
+    containerTotalNum: 3,
     listObject: [langList],
-    textObject: [infoText],
-    imageObject: [logoTop, logoBottom],
+    textObject: [langLabel],
+    imageObject: [langSprite],
   });
 }
+
+/** Export sprite dimensions so events.ts can push to the right container */
+export const LANG_PAGE_SPRITE = {
+  containerID: 3,
+  containerName: "lang-sprite",
+  width: LANG_SPRITE_W,
+  height: LANG_SPRITE_H,
+  labelID: 4,
+  labelName: "lang-name",
+};
 
 // ══════════════════════════════════════════════════════════════════
 // MOTHER TONGUE PAGE — select "I speak" language from glasses
@@ -262,7 +301,7 @@ export function buildMotherTonguePage(currentSpeakLang?: string): RebuildPageCon
     isEventCapture: 1,
   });
 
-  const currentFlag = LANG_FLAG[currentSpeakLang || 'en'] || '🇬🇧';
+  const currentFlag = LANG_FLAG[currentSpeakLang || 'en'] || '🇺🇸';
   const currentName = LANG_NATIVE[currentSpeakLang || 'en'] || 'English';
 
   const titleText = new TextContainerProperty({
@@ -319,8 +358,7 @@ export function buildLibraryPage(phrases: { en: string; native: string }[]): Reb
 // ══════════════════════════════════════════════════════════════════
 // SCENARIO GROUP LIST — pick a category after selecting language
 //   2 = group list + Back  (left side)
-//   3 = text sprite top (language flag/name rendered as image)
-//   4 = text sprite bottom
+//   3 = language sprite (single 190×144, SDK max)
 //   5 = info text ("Japanese · 18 Phrases")
 // ══════════════════════════════════════════════════════════════════
 
@@ -341,14 +379,9 @@ export function buildScenarioGroupPage(lang: LangCode, speakLangCode?: string): 
     isEventCapture: 1,
   });
 
-  const spriteTop = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 3, containerName: "lang-sprite-top",
-  });
-
-  const spriteBot = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 4, containerName: "lang-sprite-bot",
+  const langSprite = new ImageContainerProperty({
+    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: LOGO_H,
+    containerID: 3, containerName: "lang-sprite",
   });
 
   const totalPhrases = SCENARIO_GROUPS.reduce((s, g) => s + g.keys.length, 0);
@@ -360,18 +393,17 @@ export function buildScenarioGroupPage(lang: LangCode, speakLangCode?: string): 
   });
 
   return new RebuildPageContainer({
-    containerTotalNum: 4,
+    containerTotalNum: 3,
     listObject: [groupList],
     textObject: [infoText],
-    imageObject: [spriteTop, spriteBot],
+    imageObject: [langSprite],
   });
 }
 
 // ══════════════════════════════════════════════════════════════════
 // PHRASE LIST — browse phrases in a scenario group
 //   2 = phrase list + Back (scrollable, shows English summary)
-//   3 = text sprite top (context image)
-//   4 = text sprite bottom
+//   3 = scene sprite (single 190×144, SDK max)
 //   5 = info text ("Social & Greetings · 4 phrases")
 // ══════════════════════════════════════════════════════════════════
 
@@ -417,14 +449,9 @@ export function buildPhraseListPage(lang: LangCode, groupIdx: number, speakLangC
     isEventCapture: 1,
   });
 
-  const spriteTop = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 3, containerName: "ctx-top",
-  });
-
-  const spriteBot = new ImageContainerProperty({
-    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
-    containerID: 4, containerName: "ctx-bot",
+  const sceneSprite = new ImageContainerProperty({
+    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: LOGO_H,
+    containerID: 3, containerName: "scene-sprite",
   });
 
   const infoText = new TextContainerProperty({
@@ -435,10 +462,10 @@ export function buildPhraseListPage(lang: LangCode, groupIdx: number, speakLangC
   });
 
   return new RebuildPageContainer({
-    containerTotalNum: 4,
+    containerTotalNum: 3,
     listObject: [phraseList],
     textObject: [infoText],
-    imageObject: [spriteTop, spriteBot],
+    imageObject: [sceneSprite],
   });
 }
 
@@ -825,7 +852,7 @@ export function buildPhraseDetailPage(
     const GAP = 4;  // gap between speak section and learn section
 
     const spk = speakLangCode || 'en';
-    const spkFlag = LANG_FLAG[spk] || '🇬🇧';
+    const spkFlag = LANG_FLAG[spk] || '🇺🇸';
     const spkName = LANG_LABEL[spk] || 'English';
 
     // Merge romanization into native display to save a container
@@ -903,7 +930,7 @@ export function buildPhraseDetailPage(
   const GAP = 4;
 
   const spk = speakLangCode || 'en';
-  const spkFlag = LANG_FLAG[spk] || '🇬🇧';
+  const spkFlag = LANG_FLAG[spk] || '🇺🇸';
   const spkName = LANG_LABEL[spk] || 'English';
 
   const nativeFull = romText ? `${nativeDisplay}\n${trunc(romText)}` : nativeDisplay;

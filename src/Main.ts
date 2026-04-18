@@ -5,7 +5,7 @@
 
 import { waitForEvenAppBridge, DeviceConnectType } from '@evenrealities/even_hub_sdk';
 import { buildHomePage } from './pages';
-import { pushLogoToGlasses } from './image-utils';
+import { pushHomeSprite } from './image-utils';
 import { registerEventHandlers } from './events';
 import { initSync } from './sync';
 import { setStatus, setBattery, log } from './ui';
@@ -68,14 +68,14 @@ async function main(): Promise<void> {
   }
   log("Home page created", "success");
 
-  // Push logo to glasses (split into 2 halves)
-  const baseUrl = 'https://d3hospitality.github.io/lingua-franca/';
+  // Push home sprite
+  const baseUrl = import.meta.env.BASE_URL;
   try {
     await new Promise(r => setTimeout(r, 500));
-    await pushLogoToGlasses(bridge, baseUrl);
-    log("Logo pushed", "success");
+    await pushHomeSprite(bridge, baseUrl);
+    log("Home sprite pushed", "success");
   } catch (err) {
-    log("Logo not loaded: " + err, "error");
+    log("Home sprite not loaded: " + err, "error");
   }
 
   // Initialize sync bridge

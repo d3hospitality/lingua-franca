@@ -88,11 +88,17 @@ def save_api_key(key):
 CONFIG_PATH = BASE_DIR / "template_config.json"
 
 DEFAULT_TEMPLATE_NAMES = {
-    "master":   "Master Dummy",
-    "language": "Flag Master",
-    "scene":    "Scene Master",
-    "utility":  "Utility Master",
-    "world":    "World Master",
+    "master":           "Master Dummy",
+    "language":         "Flag Master",
+    "scene":            "Scene Master",
+    "utility":          "Utility Master",
+    "world":            "World Master",
+    # Per-scene masters (common templates that country variants inherit from)
+    "scene_social":     "Scene · Social",
+    "scene_food":       "Scene · Food",
+    "scene_compliment": "Scene · Compliment",
+    "scene_navigate":   "Scene · Navigate",
+    "scene_formal":     "Scene · Formal",
 }
 
 def load_template_config():
@@ -209,6 +215,79 @@ flag — never invented symbols, never the invented teal/cream/ochre
 palette. The master is purely a STYLE anchor."""
 
 
+# ── Per-scene archetypes ──────────────────────────────────────────
+# Each scene has a "common template" master that country-specific scene
+# sprites inherit from (user request: "each should have a common template
+# then coded to fit the country needs"). These replace the single generic
+# scene master and let every category (social/food/compliment/navigate/
+# formal) carry its own visual archetype.
+
+SCENE_MASTER_PROMPTS = {
+    "social": """A SOCIAL & GREETINGS SCENE ARCHETYPE — the universal template.
+Two stylized figures facing each other in 3/4 angle, each raising a small
+drinking vessel in a toast. A cluster of decorative sparkle glyphs (small
++ and * marks and dots) floats in the space between their faces, suggesting
+warm conversation meeting in the middle.
+- Both figures rendered as adult silhouettes, gender-ambiguous, neutral
+  clothing colors so country-specific variants can re-tint.
+- Composed, warm energy. Eye-line meets at canvas center.
+- Painterly pixel art, GBA-era palette, upper-left key light,
+  solid pure-black background. Square canvas, subjects fill ~65%.
+This is the COMMON TEMPLATE. Each country's social scene inherits this
+framing, pose, and lighting — only clothing palette, cultural props, and
+small backdrop details change per country.""",
+    "food": """A FOOD & DRINKS SCENE ARCHETYPE — the universal template.
+A low dining still-life centered on a table cloth: a tall tapered bottle
+silhouette on the left, a round plate in the center with a small domed
+dish on it, and a drinking cup on the right. All three objects sit at the
+same eye-line, grouped tightly.
+- Neutral cloth color, neutral tableware so country variants can restyle.
+- Painterly pixel art, GBA-era palette, upper-left key light, solid black
+  background. Objects fill ~60% of canvas, centered.
+This is the COMMON TEMPLATE every country's food scene inherits from —
+same framing and lighting, only the dish shapes, drink type, and table
+textile change to match each country.""",
+    "compliment": """A COMPLIMENTS SCENE ARCHETYPE — the universal template.
+A generous rounded speech bubble floating at canvas center, containing a
+single filled five-point star glyph inside, with a tiny heart nested in the
+star's upper arm. A short bubble tail points down-left. Two or three
+decorative sparkle dots float in the space around the bubble.
+- Warm, generous energy. Star is solid-filled, heart is outlined.
+- Painterly pixel art, GBA-era palette, upper-left key light, solid black
+  background. Bubble fills ~55% of canvas.
+This is the COMMON TEMPLATE. Each country's compliment sprite inherits
+this bubble composition and re-tints the bubble and trim in that
+country's flag-derived palette.""",
+    "navigate": """A NAVIGATION & HELP SCENE ARCHETYPE — the universal template.
+A tall wayfinding signpost at canvas center: a vertical wooden pole with
+two arrow-shaped plank signs branching horizontally in opposite directions,
+a small ornate compass rose mounted on the top of the pole. In the
+foreground, a stylized winding path leads from the base of the pole
+toward the lower edge of the canvas.
+- Neutral wood color, pale sky implied behind.
+- Painterly pixel art, GBA-era palette, upper-left key light, solid black
+  background. Signpost fills ~70% of the vertical canvas, centered.
+This is the COMMON TEMPLATE every country's navigation scene inherits —
+same pole, same arrows, same compass; only the signage treatment and
+path-surface texture adapt to each country's landscape.""",
+    "formal": """A FORMAL / CEREMONIAL SCENE ARCHETYPE — the universal template.
+A heraldic kite-shield crest centered on the canvas, rendered in
+high-contrast pixel art. Inside the shield's heart, two stylized hands
+meet in a handshake — wrists crossing at shield center, palms clasped.
+Laurel branches frame the shield's left and right sides, curling gently
+upward. A simple ribbon banner (blank) ripples across the shield's base.
+- Neutral metallic colors, neutral laurel, blank banner so country
+  variants can apply flag palette + country-specific crest motifs.
+- Painterly pixel art, GBA-era palette, upper-left key light, solid black
+  background. Crest fills ~70% of canvas, centered.
+This is the COMMON TEMPLATE every country's formal scene inherits — same
+shield shape, handshake, laurel, ribbon; only the crest motifs and ribbon
+embellishments adapt per country.""",
+}
+
+SCENE_MASTER_KEYS = list(SCENE_MASTER_PROMPTS.keys())   # ["social","food","compliment","navigate","formal"]
+
+
 WORLD_MASTER_DESCRIPTION = """A WORLD HERO SPRITE — a stylized globe surrounded by an orbital halo of
 national flag banners. This is a splash/hero asset for the Lingua Franca
 app — not a style anchor, but a feature image that represents the entire
@@ -257,6 +336,15 @@ ABSOLUTES:
 # Each entry describes the character using the MASTER DUMMY's pose and lighting,
 # but wearing flag-derived garment and framed beside a small cultural landmark.
 LANGUAGE_SPRITES = [
+    {"id": "en", "name": "English",
+     "flag": {"desc": "Flag of the United States of America (Stars and Stripes): 13 equal-height horizontal stripes alternating red and white, with red on both the top and bottom (7 red stripes, 6 white stripes). In the upper-left canton (covering the top 7 stripes and approximately 2/5 of the flag's width), a solid dark blue rectangle contains 50 small white five-point stars arranged in 9 alternating rows of 6-5-6-5-6-5-6-5-6. Official ratio 10:19.",
+              "palette": ["#B22234", "#FFFFFF", "#3C3B6E"],
+              "layout": "13-stripe horizontal field with 50-star blue canton in the upper-hoist corner"},
+     "search_hint": "american flag united states stars stripes old glory",
+     "motif": "The real United States flag as cloth: 13 red-and-white horizontal stripes (7 red, 6 white, red on top and bottom) with a dark blue canton in the upper-hoist corner containing 50 white five-point stars arranged in 9 staggered rows (6-5-6-5-6-5-6-5-6). Official proportions 10:19. Slight cloth waver, painterly pixel rendering on the stars and stripe edges.",
+     "alt_motifs": ["The Stars and Stripes flag — 13 red/white stripes with a blue canton of 50 white stars in the upper-left corner.",
+                    "American flag rendered as cloth: 13 alternating red and white horizontal stripes, blue canton filled with a field of small white five-point stars.",
+                    "A simplified US flag in the pixel style — clear red and white stripes, blue canton with an evenly-spaced grid of white stars."]},
     {"id": "ar", "name": "Arabic",
      "flag": {"desc": "Flag of Saudi Arabia: plain solid green field with the Arabic Shahada (Islamic creed) in white Thuluth calligraphy across the top, and a white horizontal sabre/sword centered beneath the script, handle to the right. Ratio 2:3.",
               "palette": ["#006C35", "#FFFFFF"],
@@ -733,6 +821,46 @@ globe and a halo of national flags. Match the master's rendering approach."""
     return str(path), None
 
 
+def generate_scene_master(scene_id, api_key):
+    """Generate one of the per-scene category masters."""
+    if scene_id not in SCENE_MASTER_PROMPTS:
+        return None, f"Unknown scene master: {scene_id}"
+    master = TEMPLATE_DIR / "master_neutral.png"
+    refs = [str(master)] if master.exists() else []
+
+    override_key = f"scene_{scene_id}"
+    body = get_template_prompt_override(override_key) or SCENE_MASTER_PROMPTS[scene_id]
+
+    prompt = f"""{SYSTEM_STYLE}
+
+{'IMAGE 1 is the MASTER FLAG CANVAS (style anchor) — match its rendering approach: cloth/pixel treatment, lighting, painterly texture.' if refs else ''}
+
+SUBJECT — Scene Master for {scene_id.upper()}:
+{body}"""
+
+    img_bytes, err = call_openai_image(prompt, api_key,
+                                       ref_paths=refs if refs else None,
+                                       retries=3)
+    if err:
+        return None, err
+    TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = TEMPLATE_DIR / f"candidate_scene_{scene_id}.png"
+    with open(path, "wb") as f:
+        f.write(img_bytes)
+    return str(path), None
+
+
+def approve_scene_master(scene_id):
+    if scene_id not in SCENE_MASTER_PROMPTS:
+        return False, f"Unknown scene master: {scene_id}"
+    cand = TEMPLATE_DIR / f"candidate_scene_{scene_id}.png"
+    if not cand.exists():
+        return False, f"No candidate for scene_{scene_id}"
+    dest = TEMPLATE_DIR / f"master_scene_{scene_id}.png"
+    shutil.copy2(cand, dest)
+    return True, str(dest)
+
+
 def approve_world_master():
     cand = TEMPLATE_DIR / "candidate_world.png"
     if not cand.exists():
@@ -883,6 +1011,12 @@ def generate_sprite(category, sprite_id, api_key):
     cribbed from soPHICON."""
     master = TEMPLATE_DIR / "master_neutral.png"
     cat_template = TEMPLATE_DIR / f"master_{category}.png"
+    # For scene sprites, prefer the scene-specific master (e.g.,
+    # master_scene_social.png) over the generic scene master.
+    if category == "scene":
+        scene_specific = TEMPLATE_DIR / f"master_scene_{sprite_id}.png"
+        if scene_specific.exists():
+            cat_template = scene_specific
 
     catalog = {"language": LANGUAGE_SPRITES,
                "scene": SCENE_SPRITES,
@@ -897,11 +1031,11 @@ def generate_sprite(category, sprite_id, api_key):
     refs = []
     if master.exists():
         refs.append(str(master))               # IMAGE 1 = master dummy
-    elif cat_template.exists():
-        refs.append(str(cat_template))
+    if cat_template.exists() and str(cat_template) not in refs:
+        refs.append(str(cat_template))         # IMAGE 2 = category/scene-specific master
 
     subject_refs = _collect_subject_refs(category, sprite_id)
-    refs.extend(subject_refs)                  # IMAGES 2+ = subject refs
+    refs.extend(subject_refs)                  # IMAGES 3+ = subject refs
 
     # ── Build prompt variants ─────────────────────────────────────
     if category == "language":
@@ -1116,7 +1250,11 @@ def api_assets():
         "language": (TEMPLATE_DIR / "master_language.png").exists(),
         "scene":    (TEMPLATE_DIR / "master_scene.png").exists(),
         "utility":  (TEMPLATE_DIR / "master_utility.png").exists(),
+        "world":    (TEMPLATE_DIR / "master_world.png").exists(),
     }
+    # Per-scene masters (5 category archetypes)
+    for sid in SCENE_MASTER_KEYS:
+        templates[f"scene_{sid}"] = (TEMPLATE_DIR / f"master_scene_{sid}.png").exists()
 
     return jsonify({
         "templates": templates,
@@ -1154,6 +1292,23 @@ def api_generate_master():
 def api_approve_master():
     ok, msg = approve_system_master()
     return jsonify({"ok": ok, "msg": msg})
+
+@app.route("/api/template/scene-master/<scene_id>/generate", methods=["POST"])
+def api_generate_scene_master(scene_id):
+    api_key = load_api_key()
+    if not api_key:
+        return jsonify({"ok": False, "msg": "No API key"}), 400
+    path, err = generate_scene_master(scene_id, api_key)
+    if err:
+        return jsonify({"ok": False, "msg": err}), 500
+    return jsonify({"ok": True, "path": path})
+
+
+@app.route("/api/template/scene-master/<scene_id>/approve", methods=["POST"])
+def api_approve_scene_master(scene_id):
+    ok, msg = approve_scene_master(scene_id)
+    return jsonify({"ok": ok, "msg": msg})
+
 
 @app.route("/api/template/world/generate", methods=["POST"])
 def api_generate_world():
@@ -1431,7 +1586,14 @@ def api_template_config_get():
                      "default_prompt": CATEGORY_TEMPLATE_PROMPTS["scene"]},
         "utility":  {"default_name": DEFAULT_TEMPLATE_NAMES["utility"],
                      "default_prompt": CATEGORY_TEMPLATE_PROMPTS["utility"]},
+        "world":    {"default_name": DEFAULT_TEMPLATE_NAMES["world"],
+                     "default_prompt": WORLD_MASTER_DESCRIPTION},
     }
+    for sid, body in SCENE_MASTER_PROMPTS.items():
+        defaults[f"scene_{sid}"] = {
+            "default_name":   DEFAULT_TEMPLATE_NAMES[f"scene_{sid}"],
+            "default_prompt": body,
+        }
     for key, d in defaults.items():
         entry = cfg.get(key) or {}
         result[key] = {
