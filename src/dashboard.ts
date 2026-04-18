@@ -578,7 +578,7 @@ function handleGlassesPageChange(state: GlassesPageState): void {
     }
   }
 
-  // If glasses entered speak/dialogue, sync phone speak tab
+  // If glasses entered speak/dialogue, sync phone speak tab + start Pulse STT
   if (state.page === 'dialogue-hud' && state.lang && !speakActive) {
     speakActive = true;
     speakTargetLangCode = state.lang as LangCode;
@@ -594,12 +594,21 @@ function handleGlassesPageChange(state: GlassesPageState): void {
         ? `${baseUrl}sprites/language/lang-${state.lang}.png`
         : `${baseUrl}sprites/candidate_language.png`;
     }
+    // Open Pulse WebSocket so glasses-initiated speak actually streams audio
+    if (hasPulseKey()) {
+      startPulseStream();
+      log(`Pulse STT started (glasses-initiated speak → ${state.langLabel || state.lang})`);
+    } else {
+      log('Set your Smallest.ai API key in Settings for live STT', 'error');
+    }
   }
 
-  // If glasses left dialogue, reset speak state
+  // If glasses left dialogue, reset speak state + stop Pulse STT
   if ((state.page === 'home' || state.page === 'speak-select') && speakActive) {
     speakActive = false;
     speakTargetLangCode = null;
+    flushAudioBuffer();
+    stopPulseStream();
     const selectCard = document.getElementById('speak-select-card');
     const hud = document.getElementById('speak-hud');
     if (selectCard) selectCard.style.display = '';
