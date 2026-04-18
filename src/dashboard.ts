@@ -21,7 +21,7 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange } from './events';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
 import { log } from './ui';
@@ -73,12 +73,14 @@ export function initDashboard(): void {
       if (code === 'en') opt.selected = true;
       inputSelect.appendChild(opt);
     });
-    inputSelect.addEventListener('change', () => {
+    inputSelect.addEventListener('change', async () => {
       setSpeakLang(inputSelect.value);
       setCustomSpeakLang(inputSelect.value);  // update custom phrase builder speak lang
       setCustomLang(activeLang);  // refresh custom phrase builder
       refreshHome();  // re-render quick scenarios with new speak language
       refreshLibrary();  // re-translate saved phrases for new speak language
+      // Push update to glasses so they reflect the new "I speak" language
+      await refreshGlassesForLanguageChange(activeLang, 'https://d3hospitality.github.io/lingua-franca/');
       log(`I speak: ${LANG_NATIVE[inputSelect.value] || inputSelect.value}`);
     });
   }
@@ -93,12 +95,15 @@ export function initDashboard(): void {
       if (code === activeLang) opt.selected = true;
       outputSelect.appendChild(opt);
     });
-    outputSelect.addEventListener('change', () => {
+    outputSelect.addEventListener('change', async () => {
       activeLang = outputSelect.value as LangCode;
       setActiveLang(activeLang);
+      setLearnLang(activeLang);  // sync glasses state
       setCustomLang(activeLang);
       refreshHome();
       refreshLibrary();  // re-translate saved phrases for new language
+      // Push update to glasses so they reflect the new learning language
+      await refreshGlassesForLanguageChange(activeLang, 'https://d3hospitality.github.io/lingua-franca/');
       log(`Language → ${LANG_LABEL[activeLang]}`);
     });
   }

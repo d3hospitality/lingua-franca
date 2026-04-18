@@ -592,6 +592,45 @@ export function setSpeakLang(lang: string): void {
   log(`I speak: ${LANG_LABEL[lang] || lang}`);
 }
 
+// ═══ PUBLIC: set learning language from dashboard ═══
+export function setLearnLang(lang: LangCode): void {
+  currentLang = lang;
+  log(`Learning: ${LANG_LABEL[lang] || lang}`);
+}
+
+// ═══ PUBLIC: refresh glasses page after language change ═══
+export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseUrl: string): Promise<void> {
+  if (!bridgeRef) return;
+
+  // If on a page that shows language-specific content, rebuild it
+  if (currentPage === "groups" && currentLang) {
+    currentLang = learnLang;
+    await bridgeRef.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
+    await pushLangSprite(bridgeRef, currentLang);
+    log(`Glasses updated → ${LANG_LABEL[currentLang]} groups`, "success");
+  }
+  else if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
+    currentLang = learnLang;
+    await bridgeRef.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
+    await pushLangSprite(bridgeRef, currentLang);
+    log(`Glasses updated → ${LANG_LABEL[currentLang]} phrases`, "success");
+  }
+  else if (currentPage === "detail" && currentLang && detailKey) {
+    currentLang = learnLang;
+    fillDetailTexts(currentLang, detailKey);
+    const slotLabels = getDetailSlotLabels(currentLang);
+    await bridgeRef.rebuildPageContainer(
+      buildPhraseDetailPage(currentLang, detailKey, detailEn, detailNative, detailRom, detailEnHL, detailNativeHL, slotLabels, detailSlotCats, speakLang, detailRomHL, detailPhon, detailPhonHL)
+    );
+    log(`Glasses updated → ${LANG_LABEL[currentLang]} detail`, "success");
+  }
+  else {
+    // On home or other pages, just update the language state
+    currentLang = learnLang;
+    log(`Language set → ${LANG_LABEL[currentLang]} (glasses will use on next nav)`, "success");
+  }
+}
+
 // ═══ PUBLIC: trigger quiz from dashboard ═══
 export async function startGlassesQuiz(lang: LangCode): Promise<void> {
   if (!bridgeRef) return;
