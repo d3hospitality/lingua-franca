@@ -1,0 +1,17 @@
+{
+  "package_id": "com.d3hospitality.linguafranca",
+  "edition": "202601",
+  "name": "Lingua Franca",
+  "version": "1.0.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.9",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Loads language sprites and assets from hosted app",
+      "whitelist": ["https://d3hospitality.github.io"]
+    }
+  ],
+  "supported_languages": ["en"]
+}

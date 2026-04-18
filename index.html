@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Lingua Franca</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span id="status-dot" class="dot disconnected"></span>
+      <span id="status-text">Connecting...</span>
+      <span id="battery-text"></span>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+      <h1>Lingua Franca</h1>
+      <p class="tagline">Real-world fluency, one scene at a time.</p>
+    </div>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-bar">
+      <button class="tab active" data-tab="home">Home</button>
+      <button class="tab" data-tab="compose">Compose</button>
+      <button class="tab" data-tab="custom">Custom</button>
+      <button class="tab" data-tab="library">Library</button>
+      <button class="tab" data-tab="quiz">Quiz</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- TAB: Home -->
+    <section id="tab-home" class="tab-panel active">
+      <div class="card">
+        <div class="card-header">Glasses Status</div>
+        <div id="home-glasses-status" class="card-body">
+          <span class="muted">Waiting for connection...</span>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="home-languages">19</div>
+          <div class="stat-label">Languages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="home-scenarios">103</div>
+          <div class="stat-label">Scenarios</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="home-saved">—</div>
+          <div class="stat-label">Saved</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="home-mastery">—</div>
+          <div class="stat-label">Mastery</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Active Language</div>
+        <div id="home-lang-picker" class="card-body">
+          <div class="lang-row">
+            <span class="lang-label">I speak</span>
+            <select id="input-lang-select" class="lang-select">
+              <option value="en" selected>🇬🇧 English</option>
+            </select>
+          </div>
+          <div class="lang-row">
+            <span class="lang-label">Learning</span>
+            <select id="output-lang-select" class="lang-select"></select>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Quick Scenarios</div>
+        <div id="home-quick-scenarios" class="card-body">
+          <span class="muted">Loading...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Compose -->
+    <section id="tab-compose" class="tab-panel">
+      <div class="card">
+        <div class="card-header">Scenario Prompt <span class="muted" style="font-weight:400;font-size:0.6rem;margin-left:auto" id="ai-badge"></span></div>
+        <div class="card-body">
+          <textarea id="compose-prompt" rows="3" placeholder="e.g. I am wanting to buy a car, I'm at the doctor, I'm ordering at a restaurant..."></textarea>
+          <div class="compose-controls" style="display:flex;gap:6px;margin-top:8px">
+            <select id="compose-tone" class="tone-select" style="flex:0 0 auto">
+              <option value="auto">Auto tone</option>
+              <option value="casual">Casual</option>
+              <option value="warm">Warm</option>
+              <option value="flirtatious">Flirtatious</option>
+              <option value="formal">Formal</option>
+            </select>
+            <button id="compose-generate" class="btn-primary" style="flex:1">Template →</button>
+            <button id="compose-ai-generate" class="btn-gold" style="flex:1">AI Generate ✦</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Generated Phrases <span class="muted" style="font-weight:400;font-size:0.6rem;margin-left:auto" id="phrase-mode-badge"></span></div>
+        <div id="compose-phrases" class="card-body">
+          <span class="muted">Describe a scenario and generate phrases</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Push to Glasses</div>
+        <div class="card-body">
+          <button id="compose-push" class="btn-secondary" disabled>Send phrases to G2 →</button>
+          <span class="muted" id="push-status"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Custom Phrase Builder -->
+    <section id="tab-custom" class="tab-panel">
+      <div class="card">
+        <div class="card-header">Custom Phrase Builder</div>
+        <div class="card-body">
+          <select id="custom-template-select" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);font-size:0.85rem;margin-bottom:8px">
+            <option value="">— Pick a phrase template —</option>
+          </select>
+          <div style="display:flex;gap:6px">
+            <textarea id="custom-phrase-input" rows="1" placeholder="...or type a phrase to match" style="flex:1"></textarea>
+            <button id="custom-phrase-scan" class="btn-outline-sm" style="white-space:nowrap">Match</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Slot Words <span class="muted" style="font-weight:400;font-size:0.65rem;margin-left:auto">tap ↻ to cycle options</span></div>
+        <div id="custom-slot-editor" class="card-body">
+          <span class="muted">Pick a template above to configure slots</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Glasses Preview <span class="muted" style="font-weight:400;font-size:0.65rem;margin-left:auto">576×288 G2 display</span></div>
+        <div id="custom-glasses-preview" class="card-body" style="background:#000;border-radius:8px;padding:0;overflow:hidden">
+          <canvas id="custom-preview-canvas" width="576" height="288" style="width:100%;display:block;image-rendering:pixelated"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="display:flex;gap:8px">
+          <button id="custom-reshuffle" class="btn-outline-sm" disabled>↻ Reshuffle</button>
+          <button id="custom-save-phrase" class="btn-primary" style="flex:1" disabled>Save Phrase</button>
+          <button id="custom-push-glasses" class="btn-secondary" style="flex:1" disabled>Push to G2 →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Library -->
+    <section id="tab-library" class="tab-panel">
+      <div class="card">
+        <div class="card-header">Saved Phrases</div>
+        <div id="library-content" class="card-body phrase-list">
+          <span class="muted">No saved phrases yet</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Custom Words</div>
+        <div id="custom-words-content" class="card-body">
+          <span class="muted">Add custom words from phrase slots</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Quiz -->
+    <section id="tab-quiz" class="tab-panel">
+      <div class="card">
+        <div class="card-header">Quiz</div>
+        <div id="quiz-content" class="card-body">
+          <button id="quiz-start" class="btn-primary">Start Quiz</button>
+          <span class="muted">Quiz yourself on saved phrases</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Stats</div>
+        <div id="quiz-stats" class="card-body">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="quiz-total">0</div>
+              <div class="stat-label">Quizzes</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="quiz-avg">—</div>
+              <div class="stat-label">Avg Score</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Settings -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <div class="card-header">OpenAI API</div>
+        <div class="card-body">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="password" id="openai-key-input" placeholder="sk-..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);font-family:monospace;font-size:0.75rem">
+            <button id="openai-key-save" class="btn-outline-sm">Save</button>
+          </div>
+          <p class="muted" style="font-size:0.65rem;margin-top:6px">Powers AI scenario phrase generation in Compose tab. Key stored in .env, never transmitted outside OpenAI API.</p>
+          <div id="openai-key-status" class="muted" style="font-size:0.65rem;margin-top:4px"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">D3 Hospitality — Command Center</div>
+        <div class="card-body">
+          <p class="muted" style="font-size:0.65rem;margin-bottom:8px">
+            Quick-launch from Terminal: <code style="background:var(--bg);padding:2px 5px;border-radius:4px;font-size:0.6rem;color:var(--gold)">~/Desktop/launchers/d3-command-center.command</code>
+          </p>
+          <div class="setting-row">
+            <span>Lingua Franca</span>
+            <span class="muted" style="color:var(--green)">Active</span>
+          </div>
+          <div class="setting-row">
+            <span>Container Editor</span>
+            <button id="launch-container-editor" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+          <div class="setting-row">
+            <span>sommNI 2</span>
+            <button id="launch-sommni" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+          <div class="setting-row">
+            <span>soPHICON G2</span>
+            <button id="launch-sophicon" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+          <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+          <div class="setting-row">
+            <span>G2 SDK Framework</span>
+            <span class="muted" style="font-size:0.6rem">D3-Hospitality-G2-Framework.md</span>
+          </div>
+          <div class="setting-row">
+            <span>sommNI Processor</span>
+            <button id="launch-sommni-proc" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+          <div class="setting-row">
+            <span>Bottle Maker</span>
+            <button id="launch-bottle-maker" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+          <div class="setting-row">
+            <span>soPHICON Sprites</span>
+            <button id="launch-sophicon-sprites" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">About</div>
+        <div class="card-body">
+          <div class="setting-row">
+            <span>Version</span>
+            <span id="settings-version" class="muted">—</span>
+          </div>
+          <div class="setting-row">
+            <span>Languages</span>
+            <span class="muted">20</span>
+          </div>
+          <div class="setting-row">
+            <span>Scenarios</span>
+            <span class="muted">103+ (AI-powered)</span>
+          </div>
+          <div class="setting-row">
+            <span>Device</span>
+            <span id="settings-device" class="muted">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">G2 BLE Direct (Experimental)</div>
+        <div class="card-body">
+          <div class="setting-row">
+            <span>Direct BLE</span>
+            <span class="muted">via g2-kit-unofficial</span>
+          </div>
+          <p class="muted" style="font-size:11px;margin-top:8px">
+            Future: Direct BLE connection for low-fps text/sprite updates
+            without EvenHub relay. Uses 4-bit greyscale tiling at ~5-20fps
+            depending on tile count. See ble-bridge.ts for integration.
+          </p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Debug Log</div>
+        <div id="log" class="card-body log-container"></div>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="/src/Main.ts"></script>
+</body>
+</html>

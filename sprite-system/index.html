@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lingua Franca — Sprite System</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0a0a0c; --surface: #111115; --card: #16161c;
+    --border: #2a2a35; --border-hover: #3a3a48;
+    --text: #e0ddd5; --faint: #7a7a88;
+    --gold: #d4af37; --gold-dim: rgba(212,175,55,0.15);
+    --green: #4ade80; --green-dim: rgba(74,222,128,0.12);
+    --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.12);
+    --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.12);
+    --red: #f87171; --red-dim: rgba(248,113,113,0.12);
+    --radius: 12px;
+    --font: 'Space Grotesk', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font);
+         min-height: 100vh; padding: 0; }
+
+  .hdr { padding: 32px 40px 20px; text-align: center;
+         border-bottom: 1px solid var(--border);
+         background: linear-gradient(180deg, rgba(167,139,250,0.04) 0%, transparent 100%); }
+  .title { font-size: 13px; font-family: var(--mono); font-weight: 600;
+           letter-spacing: 5px; text-transform: uppercase; color: var(--purple); margin-bottom: 6px; }
+  .sub { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .desc { font-size: 14px; color: var(--faint); margin-top: 6px; }
+
+  .stats { display: flex; justify-content: center; gap: 28px;
+           padding: 16px 40px; border-bottom: 1px solid var(--border);
+           background: var(--surface); flex-wrap: wrap; }
+  .stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .stat-val { font-size: 18px; font-weight: 700; color: var(--gold); font-family: var(--mono); }
+  .stat-lbl { font-size: 9px; font-weight: 600; letter-spacing: 2px;
+              text-transform: uppercase; color: var(--faint); }
+
+  .keybar { display: flex; gap: 8px; padding: 14px 40px;
+            border-bottom: 1px solid var(--border); align-items: center; }
+  .keybar input { flex: 1; background: var(--card); color: var(--text);
+                  border: 1px solid var(--border); padding: 8px 12px;
+                  border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+  .keybar button { background: var(--gold-dim); color: var(--gold);
+                   border: 1px solid var(--gold); border-radius: 8px;
+                   padding: 8px 14px; font-family: var(--mono);
+                   font-size: 11px; font-weight: 700; letter-spacing: 1px;
+                   text-transform: uppercase; cursor: pointer; }
+  .keybar .status { font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+                    color: var(--faint); padding: 4px 8px; border-radius: 4px; }
+  .keybar .status.ok { color: var(--green); background: var(--green-dim); }
+
+  .tplrow { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 14px; padding: 24px 40px; border-bottom: 1px solid var(--border); }
+  .tpl { background: var(--card); border: 1px solid var(--border);
+         border-radius: var(--radius); padding: 14px; position: relative; }
+  .tpl.has { border-color: var(--green); }
+  .tpl-name { font-size: 10px; font-family: var(--mono); font-weight: 700;
+              letter-spacing: 2px; text-transform: uppercase; color: var(--faint); }
+  .tpl.has .tpl-name { color: var(--green); }
+  .tpl-img { width: 100%; aspect-ratio: 1; background: #000; border-radius: 8px;
+             margin: 10px 0; display: flex; align-items: center; justify-content: center;
+             color: var(--faint); font-size: 24px; }
+  .tpl-img img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+  .tpl-actions { display: flex; gap: 6px; }
+  .tpl-actions button { flex: 1; background: none; color: var(--text);
+                        border: 1px solid var(--border); border-radius: 6px;
+                        padding: 6px; font-family: var(--mono); font-size: 10px;
+                        font-weight: 600; letter-spacing: 0.5px;
+                        text-transform: uppercase; cursor: pointer; }
+  .tpl-actions button:hover { border-color: var(--gold); color: var(--gold); }
+  .tpl-actions button.primary { border-color: var(--gold); color: var(--gold);
+                                background: var(--gold-dim); }
+
+  .tabs { display: flex; gap: 4px; padding: 16px 40px 0;
+          border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 18px; background: none; border: 1px solid var(--border);
+         border-bottom: none; border-radius: 8px 8px 0 0;
+         color: var(--faint); font-family: var(--mono); font-size: 11px;
+         font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+         cursor: pointer; }
+  .tab.active { background: var(--card); color: var(--gold);
+                border-color: var(--border-hover); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 12px; padding: 24px 40px 60px; }
+  .cell { background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 12px;
+          display: flex; flex-direction: column; gap: 8px;
+          transition: border-color 0.2s; }
+  .cell.has { border-color: var(--green); }
+  .cell-img { aspect-ratio: 1; background: #000; border-radius: 8px;
+              display: flex; align-items: center; justify-content: center;
+              color: var(--faint); font-size: 28px; overflow: hidden; }
+  .cell-img img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+  .cell-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .cell-id { font-size: 10px; font-family: var(--mono); color: var(--faint); }
+  .cell-actions { display: flex; gap: 4px; }
+  .cell-actions button { flex: 1; background: none; color: var(--text);
+                         border: 1px solid var(--border); border-radius: 5px;
+                         padding: 5px; font-family: var(--mono); font-size: 9px;
+                         font-weight: 600; letter-spacing: 0.5px;
+                         text-transform: uppercase; cursor: pointer; }
+  .cell-actions button:hover { border-color: var(--gold); color: var(--gold); }
+  .ref-badge { font-size: 9px; font-family: var(--mono); font-weight: 700;
+               letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px;
+               background: var(--blue-dim); color: var(--blue); margin-left: 4px;
+               vertical-align: middle; }
+  .ref-badge.empty { background: var(--red-dim); color: var(--red); }
+
+  .batchbar { display: flex; gap: 8px; padding: 14px 40px;
+              background: var(--surface); border-bottom: 1px solid var(--border); }
+  .batchbar button { background: var(--purple-dim); color: var(--purple);
+                     border: 1px solid var(--purple); border-radius: 8px;
+                     padding: 8px 14px; font-family: var(--mono);
+                     font-size: 11px; font-weight: 700; letter-spacing: 1px;
+                     text-transform: uppercase; cursor: pointer; }
+  .batchbar button.ship { background: var(--green-dim); color: var(--green);
+                          border-color: var(--green); }
+
+  #toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+           background: var(--gold); color: #000; padding: 10px 20px;
+           border-radius: 8px; font-family: var(--mono); font-size: 12px;
+           font-weight: 700; letter-spacing: 1px; z-index: 200;
+           opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="title">Lingua Franca</div>
+  <div class="sub">Sprite System</div>
+  <div class="desc">Unified 1-bit pixel sprite generator — Languages · Scenes · Utility</div>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="keybar" id="keybar">
+  <span class="status" id="keyStatus">Checking API key…</span>
+  <input id="keyInput" type="password" placeholder="sk-… (paste OpenAI key)" />
+  <button id="keySaveBtn" onclick="saveKey()">Save</button>
+  <button id="keyEditBtn" onclick="editKey()" style="display:none;">Change</button>
+</div>
+
+<div class="tplrow">
+  <div class="tpl" id="tpl-master">
+    <div class="tpl-name">Master — Traveler's Compass</div>
+    <div class="tpl-img" id="tpl-master-img">—</div>
+    <div class="tpl-actions">
+      <button onclick="genMaster()">Gen Candidate</button>
+      <button class="primary" onclick="approveMaster()">Approve</button>
+    </div>
+  </div>
+  <div class="tpl" id="tpl-language">
+    <div class="tpl-name">Language Template</div>
+    <div class="tpl-img" id="tpl-language-img">—</div>
+    <div class="tpl-actions">
+      <button onclick="genCatTpl('language')">Gen</button>
+      <button class="primary" onclick="approveCatTpl('language')">Approve</button>
+    </div>
+  </div>
+  <div class="tpl" id="tpl-scene">
+    <div class="tpl-name">Scene Template</div>
+    <div class="tpl-img" id="tpl-scene-img">—</div>
+    <div class="tpl-actions">
+      <button onclick="genCatTpl('scene')">Gen</button>
+      <button class="primary" onclick="approveCatTpl('scene')">Approve</button>
+    </div>
+  </div>
+  <div class="tpl" id="tpl-utility">
+    <div class="tpl-name">Utility Template</div>
+    <div class="tpl-img" id="tpl-utility-img">—</div>
+    <div class="tpl-actions">
+      <button onclick="genCatTpl('utility')">Gen</button>
+      <button class="primary" onclick="approveCatTpl('utility')">Approve</button>
+    </div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-cat="language" onclick="switchTab('language')">Languages</button>
+  <button class="tab" data-cat="scene" onclick="switchTab('scene')">Scenes</button>
+  <button class="tab" data-cat="utility" onclick="switchTab('utility')">Utility</button>
+</div>
+
+<div class="batchbar">
+  <button onclick="collectAllRefs()">Collect Refs For All (Current Tab)</button>
+  <button onclick="batchMissing()">Generate All Missing (Current Tab)</button>
+  <button class="ship" onclick="rebuildManifest()">Rebuild Manifest + sprites.ts</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div id="toast"></div>
+
+<script>
+let currentTab = 'language';
+let assets = { languages: [], scenes: [], utilities: [] };
+
+async function api(path, body) {
+  const opt = body
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body) }
+    : {};
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(window.__tt);
+  window.__tt = setTimeout(() => t.style.opacity = '0', 2500);
+}
+
+function setKeyBarMode(hasKey) {
+  const input   = document.getElementById('keyInput');
+  const saveBtn = document.getElementById('keySaveBtn');
+  const editBtn = document.getElementById('keyEditBtn');
+  input.style.display   = hasKey ? 'none' : '';
+  saveBtn.style.display = hasKey ? 'none' : '';
+  editBtn.style.display = hasKey ? '' : 'none';
+}
+
+async function checkKey() {
+  const d = await api('/api/key/status');
+  const el = document.getElementById('keyStatus');
+  if (d.ok) { el.textContent = 'API KEY SET'; el.classList.add('ok'); setKeyBarMode(true); }
+  else { el.textContent = 'NO API KEY'; el.classList.remove('ok'); setKeyBarMode(false); }
+}
+
+async function saveKey() {
+  const k = document.getElementById('keyInput').value.trim();
+  if (!k) return toast('Paste your key first');
+  const d = await api('/api/key/save', { key: k });
+  if (d.ok) { toast('Key saved'); document.getElementById('keyInput').value = ''; checkKey(); }
+  else toast('Error: ' + (d.msg || ''));
+}
+
+function editKey() { setKeyBarMode(false); }
+
+async function refresh() {
+  const d = await api('/api/assets');
+  assets = d;
+  // stats
+  const s = d.stats;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><span class="stat-val">${s.language_done}/${s.language_total}</span><span class="stat-lbl">Languages</span></div>
+    <div class="stat"><span class="stat-val">${s.scene_done}/${s.scene_total}</span><span class="stat-lbl">Scenes</span></div>
+    <div class="stat"><span class="stat-val">${s.utility_done}/${s.utility_total}</span><span class="stat-lbl">Utility</span></div>
+  `;
+  // templates
+  const tplMap = { master: 'master_neutral.png', language: 'master_language.png',
+                   scene: 'master_scene.png', utility: 'master_utility.png' };
+  for (const key of ['master','language','scene','utility']) {
+    const box = document.getElementById(`tpl-${key}`);
+    const img = document.getElementById(`tpl-${key}-img`);
+    const has = d.templates[key];
+    box.classList.toggle('has', has);
+    if (has) img.innerHTML = `<img src="/api/template/${tplMap[key]}?t=${Date.now()}">`;
+    else img.textContent = '—';
+  }
+  renderGrid();
+}
+
+function renderGrid() {
+  const list = currentTab === 'language' ? assets.languages
+             : currentTab === 'scene'    ? assets.scenes
+             :                             assets.utilities;
+  const prefix = currentTab === 'language' ? 'lang' : currentTab;
+  const grid = document.getElementById('grid');
+  grid.innerHTML = list.map(item => {
+    const file = `${prefix}-${item.id}.png`;
+    const src = item.generated ? `/api/sprite/${currentTab}/${file}?t=${Date.now()}` : '';
+    const refBadge = item.ref_count > 0
+      ? `<span class="ref-badge">${item.ref_count} refs</span>`
+      : `<span class="ref-badge empty">0 refs</span>`;
+    return `<div class="cell ${item.generated ? 'has' : ''}">
+      <div class="cell-img">${src ? `<img src="${src}">` : '—'}</div>
+      <div class="cell-name">${item.name} ${refBadge}</div>
+      <div class="cell-id">${item.id}</div>
+      <div class="cell-actions">
+        <button onclick="collectRefs('${currentTab}','${item.id}')">Refs</button>
+        <button onclick="genOne('${currentTab}','${item.id}')">${item.generated ? 'Regen' : 'Gen'}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function collectRefs(cat, id) {
+  toast(`Collecting refs for ${id}…`);
+  const d = await api('/api/refs/auto_collect', { category: cat, id, n: 8 });
+  toast(d.ok ? `Saved ${d.saved} refs for ${id}` : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+
+function switchTab(cat) {
+  currentTab = cat;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  renderGrid();
+}
+
+async function genMaster() {
+  toast('Generating master compass…');
+  const d = await api('/api/template/generate', {});
+  toast(d.ok ? 'Candidate ready' : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+async function approveMaster() {
+  const d = await api('/api/template/approve', {});
+  toast(d.ok ? 'Master approved' : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+async function genCatTpl(cat) {
+  toast(`Generating ${cat} template…`);
+  const d = await api('/api/template/category/generate', { category: cat });
+  toast(d.ok ? `${cat} candidate ready` : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+async function approveCatTpl(cat) {
+  const d = await api('/api/template/category/approve', { category: cat });
+  toast(d.ok ? `${cat} template approved` : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+
+async function genOne(cat, id) {
+  toast(`Generating ${cat}/${id}…`);
+  const d = await api(`/api/generate/${cat}`, { id });
+  toast(d.ok ? `${id} done` : 'Error: ' + (d.msg || ''));
+  refresh();
+}
+
+async function collectAllRefs() {
+  const list = currentTab === 'language' ? assets.languages
+             : currentTab === 'scene'    ? assets.scenes
+             :                             assets.utilities;
+  const todo = list.filter(x => x.ref_count < 4);
+  if (!todo.length) return toast('Every subject already has refs');
+  toast(`Collecting refs for ${todo.length} subjects…`);
+  for (const item of todo) {
+    await api('/api/refs/auto_collect', { category: currentTab, id: item.id, n: 8 });
+  }
+  toast(`Refs collected for ${todo.length} subjects`);
+  refresh();
+}
+
+async function batchMissing() {
+  const list = currentTab === 'language' ? assets.languages
+             : currentTab === 'scene'    ? assets.scenes
+             :                             assets.utilities;
+  const ids = list.filter(x => !x.generated).map(x => x.id);
+  if (!ids.length) return toast('Nothing missing in this tab');
+  toast(`Batch: ${ids.length} ${currentTab} sprites queued…`);
+  const d = await api('/api/generate/batch', { category: currentTab, ids });
+  const ok = d.results.filter(r => r.ok).length;
+  toast(`Batch done — ${ok}/${ids.length} ok`);
+  refresh();
+}
+
+async function rebuildManifest() {
+  const d = await api('/api/manifest', {});
+  toast(d.ok ? 'Manifest + sprites.ts rebuilt' : 'Error: ' + (d.msg || ''));
+}
+
+checkKey();
+refresh();
+</script>
+</body>
+</html>
