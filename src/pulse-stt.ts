@@ -91,27 +91,23 @@ export function startPulseStream(): void {
     language: 'multi',           // auto-detect from 30+ languages
   });
 
-  // Smallest.ai accepts auth via:
-  //   1. Authorization header (not available in browser WebSocket)
-  //   2. Token as query parameter
-  //   3. Token as Sec-WebSocket-Protocol subprotocol
-  // Use query param + subprotocol as belt-and-suspenders approach
+  // Smallest.ai auth: Authorization Bearer header
+  // Browser WebSocket doesn't support custom headers natively,
+  // so we send the token as a first JSON message after connect.
+  // Also pass as query param as fallback.
   const url = `${PULSE_BASE_URL}?${params.toString()}&token=${encodeURIComponent(apiKey)}`;
   log('[Pulse] Connecting...');
 
-  ws = new WebSocket(url, [`token-${apiKey}`]);
+  ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
     connected = true;
     log('[Pulse] Connected — streaming', 'success');
 
-    // Also send auth as first text message (covers all auth methods)
+    // Send auth token as first message (browser can't set Authorization header)
     if (ws) {
-      ws.send(JSON.stringify({
-        type: 'auth',
-        token: apiKey,
-      }));
+      ws.send(JSON.stringify({ token: apiKey }));
     }
 
     // Flush any chunks that arrived while connecting
@@ -127,8 +123,8 @@ export function startPulseStream(): void {
     try {
       const data = JSON.parse(event.data as string);
 
-      // Pulse response format: {"transcription": "...", ...}
-      const text = data.transcription || data.text || '';
+      // Smallest.ai response: {"transcript": "...", "is_final": true/false, ...}
+      const text = data.transcript || data.transcription || data.text || '';
       if (!text.trim()) return;
 
       const now = Date.now();
@@ -192,10 +188,10 @@ export function stopPulseStream(): void {
     reconnectTimer = null;
   }
   if (ws) {
-    // Send end-of-stream signal before closing
+    // Send finalize signal before closing (tells Pulse to flush final transcript)
     try {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'end' }));
+        ws.send(JSON.stringify({ type: 'finalize' }));
       }
     } catch { /* ignore */ }
 
@@ -251,11 +247,15 @@ export function sendAudioChunk(pcm: Uint8Array): void {
   }
 }
 
-/** Flush any remaining audio in the buffer (e.g., when mic stops) */
+/** Flush any remaining audio in the buffer + signal end of audio */
 export function flushAudioBuffer(): void {
-  if (chunkBuffer.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-    // Send whatever we have, even if < 4096
-    ws.send(chunkBuffer.slice(0));  // .slice creates a clean copy
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    if (chunkBuffer.length > 0) {
+      // Send whatever we have, even if < 4096
+      ws.send(chunkBuffer.slice(0));  // .slice creates a clean copy
+    }
+    // Signal end of audio so Pulse returns final transcription
+    ws.send(JSON.stringify({ type: 'finalize' }));
   }
   chunkBuffer = new Uint8Array(0);
 }
