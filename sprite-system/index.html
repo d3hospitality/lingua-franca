@@ -141,7 +141,8 @@
 
 <div class="keybar" id="keybar">
   <span class="status" id="keyStatus">Checking API key…</span>
-  <input id="keyInput" type="password" placeholder="sk-… (paste OpenAI key)" />
+  <input id="keyInput" type="password" placeholder="sk-… (paste OpenAI key — auto-saves)"
+         onpaste="onKeyPaste(event)" onblur="onKeyBlur()" oninput="onKeyInput()" />
   <button id="keySaveBtn" onclick="saveKey()">Save</button>
   <button id="keyEditBtn" onclick="editKey()" style="display:none;">Change</button>
 </div>
@@ -156,7 +157,7 @@
     </div>
   </div>
   <div class="tpl" id="tpl-language">
-    <div class="tpl-name">Language Template</div>
+    <div class="tpl-name">Flag Style Master</div>
     <div class="tpl-img" id="tpl-language-img">—</div>
     <div class="tpl-actions">
       <button onclick="genCatTpl('language')">Gen</button>
@@ -234,15 +235,44 @@ async function checkKey() {
   else { el.textContent = 'NO API KEY'; el.classList.remove('ok'); setKeyBarMode(false); }
 }
 
-async function saveKey() {
+async function saveKey(silent) {
   const k = document.getElementById('keyInput').value.trim();
-  if (!k) return toast('Paste your key first');
+  if (!k) { if (!silent) toast('Paste your key first'); return false; }
   const d = await api('/api/key/save', { key: k });
-  if (d.ok) { toast('Key saved'); document.getElementById('keyInput').value = ''; checkKey(); }
-  else toast('Error: ' + (d.msg || ''));
+  if (d.ok) {
+    if (!silent) toast('Key saved');
+    else toast('Key auto-saved');
+    document.getElementById('keyInput').value = '';
+    checkKey();
+    return true;
+  }
+  if (!silent) toast('Error: ' + (d.msg || ''));
+  return false;
 }
 
 function editKey() { setKeyBarMode(false); }
+
+// ── Auto-save hooks ─────────────────────────────────────────────
+function _looksLikeKey(v) { return v.trim().startsWith('sk-') && v.trim().length >= 20; }
+function onKeyPaste(e) {
+  // Give the paste a tick to land in the input, then save.
+  setTimeout(() => {
+    const v = document.getElementById('keyInput').value;
+    if (_looksLikeKey(v)) saveKey(true);
+  }, 50);
+}
+function onKeyBlur() {
+  const v = document.getElementById('keyInput').value;
+  if (_looksLikeKey(v)) saveKey(true);
+}
+let _kt;
+function onKeyInput() {
+  clearTimeout(_kt);
+  _kt = setTimeout(() => {
+    const v = document.getElementById('keyInput').value;
+    if (_looksLikeKey(v)) saveKey(true);
+  }, 1200);  // 1.2s idle auto-save
+}
 
 async function refresh() {
   const d = await api('/api/assets');
@@ -254,8 +284,8 @@ async function refresh() {
     <div class="stat"><span class="stat-val">${s.scene_done}/${s.scene_total}</span><span class="stat-lbl">Scenes</span></div>
     <div class="stat"><span class="stat-val">${s.utility_done}/${s.utility_total}</span><span class="stat-lbl">Utility</span></div>
   `;
-  // templates
-  const tplMap = { master: 'master_neutral.png', language: 'master_language.png',
+  // templates (language uses master_flag.png — the World Flag Style Master)
+  const tplMap = { master: 'master_neutral.png', language: 'master_flag.png',
                    scene: 'master_scene.png', utility: 'master_utility.png' };
   for (const key of ['master','language','scene','utility']) {
     const box = document.getElementById(`tpl-${key}`);
