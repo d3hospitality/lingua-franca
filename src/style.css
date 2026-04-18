@@ -137,6 +137,19 @@ textarea:focus { border-color: var(--violet-dim); }
 .custom-add-row input:focus { border-color: var(--violet-dim); }
 .custom-add-row button { padding: 6px 10px; }
 
+/* ── Speak HUD ── */
+.speak-zone { border-left: 3px solid var(--violet-dim); }
+.speak-zone.speak-them { border-left-color: var(--rose); }
+.speak-zone.speak-you { border-left-color: var(--green); }
+.speak-bubble { padding: 10px 12px; border-radius: 8px; font-size: 0.85rem; line-height: 1.4; min-height: 48px; }
+.speak-bubble-them { background: rgba(240, 171, 252, 0.08); border: 1px solid rgba(240, 171, 252, 0.15); color: var(--rose); }
+.speak-bubble-you { background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.15); color: var(--green); }
+.speak-suggestions { display: flex; flex-direction: column; gap: 6px; }
+.speak-option { padding: 10px 12px; border-radius: 8px; font-size: 0.82rem; cursor: pointer; transition: all 0.15s; background: rgba(74, 222, 128, 0.06); border: 1px solid rgba(74, 222, 128, 0.12); color: var(--text); }
+.speak-option:hover { background: rgba(74, 222, 128, 0.12); border-color: var(--green); }
+.speak-option.active { background: rgba(74, 222, 128, 0.15); border-color: var(--green); color: var(--green); }
+.speak-option.muted { cursor: default; opacity: 0.5; }
+
 /* ── Utility ── */
 .muted { color: var(--text-dim); font-size: 0.75rem; }
 .empty-state { text-align: center; padding: 24px; font-size: 0.85rem; color: var(--text-dim); }

@@ -24,6 +24,7 @@
     <!-- Tab Navigation -->
     <nav class="tab-bar">
       <button class="tab active" data-tab="home">Home</button>
+      <button class="tab" data-tab="speak">Speak</button>
       <button class="tab" data-tab="compose">Compose</button>
       <button class="tab" data-tab="custom">Custom</button>
       <button class="tab" data-tab="library">Library</button>
@@ -76,6 +77,58 @@
         <div class="card-header">Quick Scenarios</div>
         <div id="home-quick-scenarios" class="card-body">
           <span class="muted">Loading...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: Speak — Live Conversation Mode -->
+    <section id="tab-speak" class="tab-panel">
+      <!-- Language Selection -->
+      <div class="card" id="speak-select-card">
+        <div class="card-header">🗣 Speak — Live Conversation</div>
+        <div class="card-body">
+          <p class="muted" style="margin:0 0 8px">Who are you speaking with?</p>
+          <select id="speak-lang-select" class="lang-select" style="width:100%;margin-bottom:8px"></select>
+          <button id="speak-start-btn" class="btn-primary" style="width:100%">Start Conversation →</button>
+        </div>
+      </div>
+
+      <!-- Live Conversation HUD (hidden until started) -->
+      <div id="speak-hud" style="display:none">
+        <!-- Their Speech -->
+        <div class="card speak-zone speak-them">
+          <div class="card-header" style="display:flex;align-items:center;gap:8px">
+            <span id="speak-their-flag" style="font-size:1.2rem"></span>
+            <span id="speak-their-lang">Dutch</span>
+            <span class="muted" style="margin-left:auto;font-size:0.65rem">their speech · live TTS</span>
+          </div>
+          <div class="card-body">
+            <div id="speak-tts-text" class="speak-bubble speak-bubble-them">Listening...</div>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div style="text-align:center;padding:4px 0;opacity:0.3">───</div>
+
+        <!-- Your Responses -->
+        <div class="card speak-zone speak-you">
+          <div class="card-header" style="display:flex;align-items:center;gap:8px">
+            <span id="speak-your-flag" style="font-size:1.2rem">🇬🇧</span>
+            <span id="speak-your-lang">English</span>
+            <span class="muted" style="margin-left:auto;font-size:0.65rem">suggested responses</span>
+          </div>
+          <div class="card-body">
+            <div id="speak-suggestions" class="speak-suggestions">
+              <div class="speak-option muted">Waiting for speech...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="card">
+          <div class="card-body" style="display:flex;gap:8px">
+            <button id="speak-stop-btn" class="btn-secondary" style="flex:1">◼ End Conversation</button>
+          </div>
         </div>
       </div>
     </section>
@@ -194,58 +247,6 @@
     <!-- TAB: Settings -->
     <section id="tab-settings" class="tab-panel">
       <div class="card">
-        <div class="card-header">OpenAI API</div>
-        <div class="card-body">
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="password" id="openai-key-input" placeholder="sk-..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);font-family:monospace;font-size:0.75rem">
-            <button id="openai-key-save" class="btn-outline-sm">Save</button>
-          </div>
-          <p class="muted" style="font-size:0.65rem;margin-top:6px">Powers AI scenario phrase generation in Compose tab. Key stored in .env, never transmitted outside OpenAI API.</p>
-          <div id="openai-key-status" class="muted" style="font-size:0.65rem;margin-top:4px"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header">D3 Hospitality — Command Center</div>
-        <div class="card-body">
-          <p class="muted" style="font-size:0.65rem;margin-bottom:8px">
-            Quick-launch from Terminal: <code style="background:var(--bg);padding:2px 5px;border-radius:4px;font-size:0.6rem;color:var(--gold)">~/Desktop/launchers/d3-command-center.command</code>
-          </p>
-          <div class="setting-row">
-            <span>Lingua Franca</span>
-            <span class="muted" style="color:var(--green)">Active</span>
-          </div>
-          <div class="setting-row">
-            <span>Container Editor</span>
-            <button id="launch-container-editor" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-          <div class="setting-row">
-            <span>sommNI 2</span>
-            <button id="launch-sommni" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-          <div class="setting-row">
-            <span>soPHICON G2</span>
-            <button id="launch-sophicon" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-          <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
-          <div class="setting-row">
-            <span>G2 SDK Framework</span>
-            <span class="muted" style="font-size:0.6rem">D3-Hospitality-G2-Framework.md</span>
-          </div>
-          <div class="setting-row">
-            <span>sommNI Processor</span>
-            <button id="launch-sommni-proc" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-          <div class="setting-row">
-            <span>Bottle Maker</span>
-            <button id="launch-bottle-maker" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-          <div class="setting-row">
-            <span>soPHICON Sprites</span>
-            <button id="launch-sophicon-sprites" class="btn-outline-sm" style="font-size:0.65rem">Launch</button>
-          </div>
-        </div>
-      </div>
-      <div class="card">
         <div class="card-header">About</div>
         <div class="card-body">
           <div class="setting-row">
@@ -264,20 +265,6 @@
             <span>Device</span>
             <span id="settings-device" class="muted">—</span>
           </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header">G2 BLE Direct (Experimental)</div>
-        <div class="card-body">
-          <div class="setting-row">
-            <span>Direct BLE</span>
-            <span class="muted">via g2-kit-unofficial</span>
-          </div>
-          <p class="muted" style="font-size:11px;margin-top:8px">
-            Future: Direct BLE connection for low-fps text/sprite updates
-            without EvenHub relay. Uses 4-bit greyscale tiling at ~5-20fps
-            depending on tile count. See ble-bridge.ts for integration.
-          </p>
         </div>
       </div>
       <div class="card">

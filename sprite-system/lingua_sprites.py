@@ -82,6 +82,40 @@ def save_api_key(key):
 
 
 # ══════════════════════════════════════════════════════════════════
+# TEMPLATE CONFIG (editable per-master name + prompt overrides)
+# ══════════════════════════════════════════════════════════════════
+
+CONFIG_PATH = BASE_DIR / "template_config.json"
+
+DEFAULT_TEMPLATE_NAMES = {
+    "master":   "Master Dummy",
+    "language": "Flag Master",
+    "scene":    "Scene Master",
+    "utility":  "Utility Master",
+    "world":    "World Master",
+}
+
+def load_template_config():
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except Exception:
+            pass
+    return {}
+
+def save_template_config(cfg):
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n")
+
+def get_template_name(key):
+    cfg = load_template_config()
+    return (cfg.get(key) or {}).get("name") or DEFAULT_TEMPLATE_NAMES.get(key, key)
+
+def get_template_prompt_override(key):
+    cfg = load_template_config()
+    return (cfg.get(key) or {}).get("prompt") or None
+
+
+# ══════════════════════════════════════════════════════════════════
 # UNIFIED STYLE PROMPT  (the Rosetta Stone)
 # ══════════════════════════════════════════════════════════════════
 # Every sprite references this so Lingua Franca sits alongside sommNI
@@ -117,24 +151,48 @@ SYSTEM_STYLE = """MANDATORY STYLE RULES (apply to EVERY sprite in this system):
 # MASTER ANCHOR — The Blank Traveler (Player 1 Dummy)
 # ══════════════════════════════════════════════════════════════════
 
-MASTER_DESCRIPTION = """A BLANK TRAVELER PORTRAIT — the visual anchor of Lingua Franca.
-Think: the "Player 1" placeholder before character customization begins.
+MASTER_DESCRIPTION = """A BLANK FLAG CANVAS — the visual anchor of Lingua Franca.
+Every language sprite is a FLAG. This master establishes exactly how
+flags are rendered in this system. The master itself is NOT a real
+country's flag; it is the canonical EXAMPLE flag that every real
+country's flag will inherit its rendering style from.
 
-- Head and shoulders portrait only, slight 3/4 angle facing forward
-- Simple, clean, stylized face with soft ambiguous features — could be
-  any gender, any ethnicity. Youthful-to-middle-aged appearance
-- Short, neat, dark hair (generic unisex style)
-- Warm medium skin tone, no distinct ethnic markers
-- Calm, neutral, composed expression — the resting face of a traveler
-  listening to the world
+LAYOUT:
+- A single rectangular flag, aspect ratio 2:3 (or 3:5 — whatever reads
+  cleanest), centered on the canvas, filling ~80% of the canvas area
+- The flag appears as cloth — slight fabric waver at the edges, subtle
+  cloth texture across the surface (gentle dither, not photographic)
+- No flagpole, no hanging rope, no hand holding it — just the flag
+  itself, floating centered on the background
 
-CLOTHING: A plain neutral-gray scholar's overshirt / traveling coat at the
-shoulders, high collar. Unadorned. NO flag, NO national colors, NO
-insignia — this is the BLANK garment that every language-sprite will
-REPLACE with its own flag-derived clothing. Think: the undyed linen shirt
-a traveller wears before they are "clothed" by the country they step into.
+DESIGN (invented, not a real flag):
+- Three equal horizontal bands in three invented muted colors —
+  think desaturated teal / warm cream / muted ochre
+- A single simple invented ornamental emblem centered on the middle
+  band: a geometric eight-point compass-rose star, small, clean,
+  rendered in a crisp contrasting color
+- No text, no country name, no letters, no real-world symbols
 
-BACKGROUND: Solid pure black. Nothing behind the character.
+STYLE:
+- Painterly pixel art — GBA-era hybrid, visible brushstrokes on the
+  fabric, crisp geometric edges on the stripe boundaries and emblem
+- Rich but limited palette, slightly desaturated
+- Clean solid pure-black background behind the flag
+- LIGHTING: soft key light from upper-left at ~45 degrees — subtle
+  highlight on the upper-left portion of the cloth, gentle shadow on
+  the lower-right. This lighting stays IDENTICAL across every language
+  flag that follows
+- Strong, clean silhouette of the rectangle; readable at 96×96
+
+This master establishes:
+1. EXACT flag aspect ratio and canvas placement
+2. EXACT lighting angle and cloth-rendering approach
+3. EXACT stripe geometry and emblem placement conventions
+4. EXACT palette saturation/mood
+5. EXACT pixel rendering style
+
+Every real country's flag sprite inherits THIS rendering and substitutes
+that country's real geometry, palette, and symbols.
 
 This portrait establishes:
 1. The EXACT head position, size, and canvas placement (all language
@@ -144,10 +202,46 @@ This portrait establishes:
 4. The shoulder framing and crop
 5. The neutral facial expression every language portrait inherits
 
-NOTE: Only pose, framing, lighting, style, and expression carry forward.
-Every individual language sprite will REPLACE the blank garment with
-clothing derived from that country's flag (colors, patterns, symbols)
-and may ADD a small cultural-landmark motif in the background."""
+NOTE: Only the rendering style, lighting, cloth texture, canvas framing,
+and ratio conventions carry forward. Every real language sprite uses
+THIS template's rendering approach to depict its own country's real
+flag — never invented symbols, never the invented teal/cream/ochre
+palette. The master is purely a STYLE anchor."""
+
+
+WORLD_MASTER_DESCRIPTION = """A WORLD HERO SPRITE — a stylized globe surrounded by an orbital halo of
+national flag banners. This is a splash/hero asset for the Lingua Franca
+app — not a style anchor, but a feature image that represents the entire
+ecosystem in one square.
+
+COMPOSITION:
+- Dead-center: a painterly pixel-art world globe, filling ~45% of canvas
+- The globe shows simplified, recognizable continent silhouettes in muted
+  earth tones (warm ochre / terracotta landmasses, soft deep teal oceans)
+- Subtle longitude/latitude grid lines across the sphere, very faint
+- A gentle glow/aura around the globe (tasteful, not neon)
+
+FLAG HALO:
+- A single orbital ring of 20 small rectangular national flag banners
+  distributed evenly around the globe (roughly one every 18° of arc)
+- Each flag is ~7–9% of canvas size, slightly wavering like cloth
+- Flags rendered in the SAME Lingua Franca pixel style as the individual
+  language sprites (painterly pixel, crisp stripe edges, upper-left light)
+- If real national flags are depicted, they must be accurate — correct
+  geometry, palette, and symbols. The halo should read as "the world of
+  languages this app supports"
+- No flagpoles, no ropes — flags float cleanly as banners in the ring
+
+STYLE:
+- Painterly pixel art, GBA-era palette, slightly desaturated
+- Single key light from upper-left at ~45 degrees across both globe and flags
+- Solid pure-black background behind everything
+- Square canvas; globe centered; halo centered on the globe
+
+ABSOLUTES:
+- NO text, NO labels, NO country names, NO app logo
+- NO people, NO characters — just globe + flag halo + black background
+- Composition reads as one cohesive piece, not a collage"""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -163,102 +257,182 @@ and may ADD a small cultural-landmark motif in the background."""
 # Each entry describes the character using the MASTER DUMMY's pose and lighting,
 # but wearing flag-derived garment and framed beside a small cultural landmark.
 LANGUAGE_SPRITES = [
-    {"id": "ar", "name": "Arabic", "search_hint": "saudi flag green arabesque pattern calligraphy",
+    {"id": "ar", "name": "Arabic",
+     "flag": {"desc": "Flag of Saudi Arabia: plain solid green field with the Arabic Shahada (Islamic creed) in white Thuluth calligraphy across the top, and a white horizontal sabre/sword centered beneath the script, handle to the right. Ratio 2:3.",
+              "palette": ["#006C35", "#FFFFFF"],
+              "layout": "solid field with centered calligraphy + sword"},
+     "search_hint": "saudi flag green arabesque pattern calligraphy",
      "motif": "The traveler wears a deep green robe with a flowing Arabic calligraphy band across the chest in white — the color palette taken from the Saudi flag (deep green + white). A small crescent moon and an eight-point Islamic star are embroidered as shoulder motifs. Background hints at a pale sand horizon.",
      "alt_motifs": ["The traveler wears a green robe with white calligraphic trim. A crescent and star sit on one shoulder.",
                     "A figure draped in a deep green garment with white ornamental script along the collar.",
                     "Portrait wearing an emerald scholar's robe with white geometric stars along the front."]},
-    {"id": "bg", "name": "Bulgarian", "search_hint": "bulgaria flag white green red folk embroidery rose",
+    {"id": "bg", "name": "Bulgarian",
+     "flag": {"desc": "Flag of Bulgaria: three equal horizontal bands — white (top), green (middle), red (bottom). Ratio 3:5. No emblem.",
+              "palette": ["#FFFFFF", "#00966E", "#D62612"],
+              "layout": "horizontal tricolor"},
+     "search_hint": "bulgaria flag white green red folk embroidery rose",
      "motif": "The traveler wears a folk-embroidered tunic striped horizontally in white, green, and red — Bulgaria's tricolor. Red-and-white folk stitch patterns run along the collar and cuffs. A single Bulgarian rose bloom is pinned at the collar. Background hints at rolling Thracian hills.",
      "alt_motifs": ["The traveler wears a white tunic with green and red folk-stitched bands and a rose at the collar.",
                     "A figure in a folk-embroidered shirt in Bulgaria's white/green/red tricolor palette.",
                     "Portrait wearing a horizontally-striped white/green/red folk tunic with floral stitching."]},
-    {"id": "zh", "name": "Chinese", "search_hint": "china flag red yellow star hanfu dragon pattern",
+    {"id": "zh", "name": "Chinese",
+     "flag": {"desc": "Flag of the People's Republic of China: red field with five golden five-point stars in the upper-left canton — one large star and four smaller stars arranged in an arc around it, each smaller star oriented with one point toward the large star. Ratio 2:3.",
+              "palette": ["#EE1C25", "#FFFF00"],
+              "layout": "solid field with canton of five stars"},
+     "search_hint": "china flag red yellow star hanfu dragon pattern",
      "motif": "The traveler wears a red hanfu-style robe with a large yellow five-point star and four smaller yellow stars arranged in an arc at the chest — the Chinese flag rendered as a garment. Subtle yellow dragon embroidery on the sleeves. Behind them, a small pagoda silhouette on a mountain ridge.",
      "alt_motifs": ["A figure in a crimson robe with five yellow stars at the chest and dragon embroidery on the sleeves.",
                     "Portrait wearing a red hanfu with yellow star constellation on the chest.",
                     "The traveler wears a deep red tunic with golden stars at the chest, pagoda in the background."]},
-    {"id": "nl", "name": "Dutch", "search_hint": "netherlands flag red white blue tulip windmill",
+    {"id": "nl", "name": "Dutch",
+     "flag": {"desc": "Flag of the Netherlands: three equal horizontal bands — red (top), white (middle), blue (bottom). Ratio 2:3. No emblem.",
+              "palette": ["#AE1C28", "#FFFFFF", "#21468B"],
+              "layout": "horizontal tricolor"},
+     "search_hint": "netherlands flag red white blue tulip windmill",
      "motif": "The traveler wears a high-collared coat horizontally striped in red, white, and blue — the Dutch flag as clothing. A single orange tulip is pinned at the lapel (a nod to the House of Orange). Behind them, a windmill silhouette on a flat horizon.",
      "alt_motifs": ["A figure in a red/white/blue horizontally striped coat with an orange tulip lapel pin.",
                     "Portrait wearing a Dutch tricolor coat with a tulip at the collar, windmill visible behind.",
                     "The traveler wears a red-white-blue striped garment with a tulip flourish at the chest."]},
-    {"id": "tl", "name": "Filipino", "search_hint": "philippines flag blue red yellow sun jeepney",
+    {"id": "tl", "name": "Filipino",
+     "flag": {"desc": "Flag of the Philippines: horizontal bicolor — royal blue (top band) and red (bottom band) — with a white equilateral triangle on the hoist (left) side. Inside the triangle: a golden eight-ray sun centered, and three golden five-point stars in each corner of the triangle. Ratio 1:2.",
+              "palette": ["#0038A8", "#CE1126", "#FFFFFF", "#FCD116"],
+              "layout": "horizontal bicolor with hoist-side triangle"},
+     "search_hint": "philippines flag blue red yellow sun jeepney",
      "motif": "The traveler wears a barong tagalog-style embroidered tunic where the two halves split blue (upper) and red (lower), with a white triangle across the chest containing a golden eight-ray sun — the Philippine flag as clothing. Three small stars at the corners of the triangle. Behind them, a tropical palm-fringed horizon.",
      "alt_motifs": ["A figure in a split blue/red tunic with a white triangular chest panel containing a golden sun.",
                     "Portrait wearing a barong-style garment patterned with the Philippine flag; sun and stars on the chest.",
                     "The traveler wears a blue-and-red embroidered tunic with a white chest triangle and eight-ray sun."]},
-    {"id": "fr", "name": "French", "search_hint": "france flag blue white red beret",
+    {"id": "fr", "name": "French",
+     "flag": {"desc": "Flag of France: three equal vertical bands — blue (hoist/left), white (middle), red (fly/right). Ratio 2:3. No emblem.",
+              "palette": ["#0055A4", "#FFFFFF", "#EF4135"],
+              "layout": "vertical tricolor"},
+     "search_hint": "france flag blue white red beret",
      "motif": "The traveler wears a long coat with three vertical bands of blue, white, and red — the French tricolor as clothing. A silver fleur-de-lis pin at the collar. A beret tilted on the head. Behind them, a thin silhouette of the Eiffel Tower's upper spire.",
      "alt_motifs": ["A figure in a blue/white/red vertically-striped long coat with a fleur-de-lis pin.",
                     "Portrait wearing the French tricolor as a coat with a silver pin at the collar.",
                     "The traveler wears a vertical-striped tricolor garment, Eiffel Tower outline behind them."]},
-    {"id": "de", "name": "German", "search_hint": "germany flag black red gold eagle brandenburg",
+    {"id": "de", "name": "German",
+     "flag": {"desc": "Flag of Germany: three equal horizontal bands — black (top), red (middle), gold (bottom). Ratio 3:5. No emblem on civil flag.",
+              "palette": ["#000000", "#DD0000", "#FFCE00"],
+              "layout": "horizontal tricolor"},
+     "search_hint": "germany flag black red gold eagle brandenburg",
      "motif": "The traveler wears a high-collared coat horizontally banded in black, red, and gold — the German flag as clothing. A small stylized black eagle crest at the chest. Behind them, a pale silhouette of the Brandenburg Gate's columns.",
      "alt_motifs": ["A figure in a black/red/gold horizontally banded coat with a small eagle crest on the chest.",
                     "Portrait wearing a tricolor coat in black, red, and gold with a heraldic eagle emblem.",
                     "The traveler wears a black-red-gold striped garment, columns of a neoclassical gate behind them."]},
-    {"id": "hi", "name": "Hindi", "search_hint": "india flag saffron white green chakra taj mahal",
+    {"id": "hi", "name": "Hindi",
+     "flag": {"desc": "Flag of India: three equal horizontal bands — saffron/orange (top), white (middle), India green (bottom). A navy-blue 24-spoke Ashoka Chakra wheel centered on the white band. Ratio 2:3.",
+              "palette": ["#FF9933", "#FFFFFF", "#138808", "#000080"],
+              "layout": "horizontal tricolor with centered wheel"},
+     "search_hint": "india flag saffron white green chakra taj mahal",
      "motif": "The traveler wears a sherwani-style tunic banded horizontally in saffron (top), white (middle), and green (bottom) — the Indian flag as clothing. A deep navy Ashoka chakra wheel is embroidered at the chest center. Behind them, the small silhouette of the Taj Mahal's central dome.",
      "alt_motifs": ["A figure in a saffron/white/green horizontally banded tunic with a navy wheel emblem at the chest.",
                     "Portrait wearing an Indian tricolor sherwani with a chakra wheel embroidered on the chest.",
                     "The traveler wears a saffron-white-green banded garment with a navy 24-spoke wheel at the heart."]},
-    {"id": "id", "name": "Indonesian", "search_hint": "indonesia flag red white batik borobudur",
+    {"id": "id", "name": "Indonesian",
+     "flag": {"desc": "Flag of Indonesia: horizontal bicolor — red (top band) over white (bottom band), equal heights. Ratio 2:3. No emblem.",
+              "palette": ["#FF0000", "#FFFFFF"],
+              "layout": "horizontal bicolor"},
+     "search_hint": "indonesia flag red white batik borobudur",
      "motif": "The traveler wears a batik-patterned garment split horizontally — red upper half, white lower half — the Indonesian flag as clothing. Ornate batik flourishes run along the red portion. Behind them, a tiered Borobudur stupa silhouette.",
      "alt_motifs": ["A figure in a garment split red over white with batik pattern flourishes along the red panel.",
                     "Portrait wearing a red-and-white batik tunic, stepped stupa temple silhouette behind.",
                     "The traveler wears a bisected red/white garment with intricate batik trim."]},
-    {"id": "it", "name": "Italian", "search_hint": "italy flag green white red renaissance colosseum",
+    {"id": "it", "name": "Italian",
+     "flag": {"desc": "Flag of Italy: three equal vertical bands — green (hoist/left), white (middle), red (fly/right). Ratio 2:3. No emblem.",
+              "palette": ["#009246", "#FFFFFF", "#CE2B37"],
+              "layout": "vertical tricolor"},
+     "search_hint": "italy flag green white red renaissance colosseum",
      "motif": "The traveler wears a Renaissance-style doublet with three vertical panels of green, white, and red — the Italian tricolor as clothing. A small laurel wreath pin on the white central panel. Behind them, the tiered arches of the Colosseum in silhouette.",
      "alt_motifs": ["A figure in a green/white/red vertically-paneled doublet with a laurel wreath pin on the white center.",
                     "Portrait wearing an Italian tricolor doublet with olive-branch pin, Colosseum behind.",
                     "The traveler wears a vertical green-white-red paneled garment with Renaissance tailoring."]},
-    {"id": "ja", "name": "Japanese", "search_hint": "japan flag red circle white kimono sun fuji",
+    {"id": "ja", "name": "Japanese",
+     "flag": {"desc": "Flag of Japan (Nisshōki / Hinomaru): plain white rectangular field with a single large crimson-red solar disc centered. The disc's diameter is 3/5 the flag's height, positioned exactly in the center. Ratio 2:3.",
+              "palette": ["#FFFFFF", "#BC002D"],
+              "layout": "solid field with single centered disc"},
+     "search_hint": "japan flag red circle white kimono sun fuji",
      "motif": "The traveler wears a white kimono-style robe with a single large crimson solar disc centered on the chest — the Japanese flag as clothing. Subtle crane embroidery on the sleeves. Behind them, the snow-capped silhouette of Mount Fuji and a small torii gate.",
      "alt_motifs": ["A figure in a white kimono with a single red sun disc centered on the chest.",
                     "Portrait wearing a white robe with crimson rising-sun motif at the heart, Fuji behind.",
                     "The traveler wears a white kimono-style garment with a red sun disc on the chest and a torii behind."]},
-    {"id": "ko", "name": "Korean", "search_hint": "korea flag taegeuk trigrams hanbok palace",
+    {"id": "ko", "name": "Korean",
+     "flag": {"desc": "Flag of South Korea (Taegukgi): white field with a red-and-blue taegeuk (yin-yang circle, red top, blue bottom) centered. Four black trigrams at the corners: Geon (☰, three solid bars, upper-left), Ri (☲, solid/broken/solid, upper-right), Gam (☵, broken/solid/broken, lower-left), Gon (☷, three broken bars, lower-right). Ratio 2:3.",
+              "palette": ["#FFFFFF", "#C60C30", "#003478", "#000000"],
+              "layout": "white field with centered taegeuk and four corner trigrams"},
+     "search_hint": "korea flag taegeuk trigrams hanbok palace",
      "motif": "The traveler wears a hanbok-style jeogori (short jacket) with a red-and-blue taegeuk (yin-yang) centered on the chest, surrounded by four black trigrams at the corners — the South Korean flag as clothing. Behind them, a curved-eave palace pavilion silhouette.",
      "alt_motifs": ["A figure in a white hanbok jacket with a red/blue yin-yang and four trigrams on the chest.",
                     "Portrait wearing a hanbok with the taegeuk centered at the heart, palace behind.",
                     "The traveler wears a white hanbok jacket embroidered with the Korean flag's central motif."]},
-    {"id": "pl", "name": "Polish", "search_hint": "poland flag white red eagle szlachta",
+    {"id": "pl", "name": "Polish",
+     "flag": {"desc": "Flag of Poland: horizontal bicolor — white (top band) over red (bottom band), equal heights. Ratio 5:8. No emblem on civil flag.",
+              "palette": ["#FFFFFF", "#DC143C"],
+              "layout": "horizontal bicolor"},
+     "search_hint": "poland flag white red eagle szlachta",
      "motif": "The traveler wears a szlachta-style noble coat split horizontally — white upper half, deep red lower half — the Polish flag as clothing. A white crowned eagle crest sits at the chest on a red shield. Behind them, a pale Warsaw skyline.",
      "alt_motifs": ["A figure in a coat split white-over-red with a crowned white eagle emblem at the chest.",
                     "Portrait wearing a Polish white-and-red garment with heraldic eagle crest.",
                     "The traveler wears a bisected white/red coat with the Polish eagle on the chest."]},
-    {"id": "pt", "name": "Portuguese", "search_hint": "portugal flag green red armillary sphere caravel",
+    {"id": "pt", "name": "Portuguese",
+     "flag": {"desc": "Flag of Portugal: vertical bicolor — green (hoist-side 2/5) and red (fly-side 3/5). Where the two colors meet sits the national coat of arms: a golden armillary sphere behind a red-and-white shield with five blue escutcheons in a cross and seven gold castles along the red border. Ratio 2:3.",
+              "palette": ["#006600", "#FF0000", "#FFFF00", "#FFFFFF", "#0000FF"],
+              "layout": "vertical bicolor with coat of arms at the color seam"},
+     "search_hint": "portugal flag green red armillary sphere caravel",
      "motif": "The traveler wears a long overcoat split vertically — green (left third), red (right two-thirds) — the Portuguese flag as clothing. A golden armillary sphere and small shield are embroidered where the two colors meet at the chest. Behind them, the mast and sail of a caravel.",
      "alt_motifs": ["A figure in a green-and-red vertically-split coat with a golden armillary sphere at the chest.",
                     "Portrait wearing Portugal's green/red coat with an armillary sphere emblem on the chest.",
                     "The traveler wears a green-red split garment with a ringed sphere and small shield where the colors meet."]},
-    {"id": "ru", "name": "Russian", "search_hint": "russia flag white blue red saint basil onion domes",
+    {"id": "ru", "name": "Russian",
+     "flag": {"desc": "Flag of the Russian Federation: three equal horizontal bands — white (top), blue (middle), red (bottom). Ratio 2:3. No emblem.",
+              "palette": ["#FFFFFF", "#0039A6", "#D52B1E"],
+              "layout": "horizontal tricolor"},
+     "search_hint": "russia flag white blue red saint basil onion domes",
      "motif": "The traveler wears an overcoat banded horizontally in white, blue, and red — the Russian tricolor as clothing. Elaborate gold braid trim runs along the collar. Behind them, a cluster of colorful St. Basil's Cathedral onion domes as a distant silhouette.",
      "alt_motifs": ["A figure in a white/blue/red horizontally banded overcoat with gold braid at the collar.",
                     "Portrait wearing a Russian tricolor coat with ornate braid trim, onion domes behind.",
                     "The traveler wears a white-blue-red banded coat with golden collar embroidery."]},
-    {"id": "es", "name": "Spanish", "search_hint": "spain flag red yellow coat of arms sagrada familia",
+    {"id": "es", "name": "Spanish",
+     "flag": {"desc": "Flag of Spain: three horizontal bands — red (top 1/4), yellow (middle 1/2, double height), red (bottom 1/4). The Spanish coat of arms (quartered shield with crown and flanking Pillars of Hercules) sits on the yellow band, positioned 1/3 from the hoist. Ratio 2:3.",
+              "palette": ["#AA151B", "#F1BF00"],
+              "layout": "horizontal triband (1:2:1) with coat of arms on yellow"},
+     "search_hint": "spain flag red yellow coat of arms sagrada familia",
      "motif": "The traveler wears a matador-style jacket banded horizontally — red (top), yellow (wide middle), red (bottom) — the Spanish flag as clothing. A small golden royal coat-of-arms crest at the chest. Behind them, the multi-spired silhouette of Sagrada Família.",
      "alt_motifs": ["A figure in a red/yellow/red horizontally banded matador jacket with a royal crest on the chest.",
                     "Portrait wearing Spain's red-yellow-red banded jacket with the coat of arms at the heart.",
                     "The traveler wears a Spanish tricolor jacket with gold embroidered crest at the center."]},
-    {"id": "sv", "name": "Swedish", "search_hint": "sweden flag blue yellow cross nordic viking longship",
+    {"id": "sv", "name": "Swedish",
+     "flag": {"desc": "Flag of Sweden: blue field with a yellow/gold Nordic cross — the vertical arm of the cross is offset toward the hoist (left) side. Ratio 5:8.",
+              "palette": ["#006AA7", "#FECC00"],
+              "layout": "blue field with off-center Nordic cross"},
+     "search_hint": "sweden flag blue yellow cross nordic viking longship",
      "motif": "The traveler wears a blue tunic with a large off-center yellow Nordic cross spanning the chest and shoulders — the Swedish flag as clothing. A small silver Tre Kronor (three crowns) pin at the collar. Behind them, a Viking longship's dragon prow in silhouette.",
      "alt_motifs": ["A figure in a deep blue tunic with a yellow off-center Nordic cross across the chest.",
                     "Portrait wearing the Swedish blue-and-gold cross garment, a longship dragon prow behind.",
                     "The traveler wears a blue tunic with a large gold Scandinavian cross extending across the shoulders."]},
-    {"id": "th", "name": "Thai", "search_hint": "thailand flag red white blue wat arun elephant",
+    {"id": "th", "name": "Thai",
+     "flag": {"desc": "Flag of Thailand (Trairanga): five horizontal bands — red (top, 1/6), white (1/6), deep blue (middle, 1/3 — double height), white (1/6), red (bottom, 1/6). Ratio 2:3. No emblem.",
+              "palette": ["#ED1C24", "#FFFFFF", "#241D4F"],
+              "layout": "horizontal five-band (red/white/blue-double/white/red)"},
+     "search_hint": "thailand flag red white blue wat arun elephant",
      "motif": "The traveler wears a silk wrap banded horizontally in red, white, blue (wide middle), white, red — the Thai flag as clothing. Gold thread trim at the collar with small elephant motifs. Behind them, the stepped prang spire of Wat Arun.",
      "alt_motifs": ["A figure in a silk garment banded red/white/blue/white/red with gold elephant trim.",
                     "Portrait wearing a horizontally-banded five-stripe Thai garment with stepped temple behind.",
                     "The traveler wears a Thai tricolor silk wrap with gold collar embroidery."]},
-    {"id": "tr", "name": "Turkish", "search_hint": "turkey flag red white crescent star hagia sophia",
+    {"id": "tr", "name": "Turkish",
+     "flag": {"desc": "Flag of Turkey (Ay Yıldız): solid crimson-red field with a white waxing crescent moon (opening to the fly/right) and a white five-point star to the right of the crescent, both positioned slightly left of center. Ratio 2:3.",
+              "palette": ["#E30A17", "#FFFFFF"],
+              "layout": "solid field with crescent moon and five-point star"},
+     "search_hint": "turkey flag red white crescent star hagia sophia",
      "motif": "The traveler wears a crimson kaftan with a large white crescent moon and five-point star centered on the chest — the Turkish flag as clothing. Subtle white tughra-style calligraphic embroidery on the sleeves. Behind them, the dome-and-minarets silhouette of Hagia Sophia.",
      "alt_motifs": ["A figure in a crimson kaftan with a white crescent and star at the chest.",
                     "Portrait wearing a Turkish red kaftan with crescent-and-star emblem, domed mosque behind.",
                     "The traveler wears a red kaftan with white crescent moon and star motif on the chest."]},
-    {"id": "vi", "name": "Vietnamese", "search_hint": "vietnam flag red yellow star ao dai lotus non la",
+    {"id": "vi", "name": "Vietnamese",
+     "flag": {"desc": "Flag of Vietnam: solid crimson-red field with a single large golden-yellow five-point star centered. Ratio 2:3.",
+              "palette": ["#DA251D", "#FFFF00"],
+              "layout": "solid field with single centered five-point star"},
+     "search_hint": "vietnam flag red yellow star ao dai lotus non la",
      "motif": "The traveler wears an áo dài-style long tunic in deep red with a large golden five-point star centered on the chest — the Vietnamese flag as clothing. A conical non lá hat tilts on the head. Behind them, a lotus bloom rising from a small sampan boat on a water line.",
      "alt_motifs": ["A figure in a red áo dài tunic with a large golden five-point star at the chest, wearing a conical hat.",
                     "Portrait wearing a crimson long tunic with a single gold star on the chest, lotus behind.",
@@ -432,23 +606,25 @@ def _call_simple(prompt, api_key):
 # ══════════════════════════════════════════════════════════════════
 
 def generate_system_master(api_key, ref_path=None):
-    """Generate the universal style master — the Traveler's Compass."""
+    """Generate the master flag canvas. Honors prompt override from config."""
     ref_note = ""
     if ref_path:
-        ref_note = "\n\nA REFERENCE IMAGE is attached. Use it as strong visual inspiration for composition and silhouette — but render it in the pixel art style described above."
+        ref_note = "\n\nA REFERENCE IMAGE is attached. Use it as visual inspiration — but render it in the pixel art style described above."
 
-    prompt = f"""{SYSTEM_STYLE}
+    override = get_template_prompt_override("master")
+    if override:
+        # User-edited prompt wins, but we still prepend SYSTEM_STYLE as the guardrail
+        prompt = f"""{SYSTEM_STYLE}
+
+{override}{ref_note}"""
+    else:
+        prompt = f"""{SYSTEM_STYLE}
 
 SUBJECT: {MASTER_DESCRIPTION}
 
-POSE: Head-on, perfectly centered, filling ~70% of the canvas.
-
 This is the MASTER TEMPLATE for the entire Lingua Franca sprite system.
-Every sprite generated after this (language flags, scene icons, utility
-glyphs) must match this EXACT pixel art style, lighting direction,
-contrast level, stroke weight, and rendering quality.
-
-The compass establishes the visual DNA. Everything else inherits from it.{ref_note}"""
+Every language flag generated after this must match this EXACT pixel art
+style, lighting direction, contrast level, and cloth rendering.{ref_note}"""
 
     if ref_path and Path(ref_path).exists():
         img_bytes, err = _call_with_refs(prompt, api_key, [str(ref_path)])
@@ -490,13 +666,15 @@ def generate_category_template(category, api_key):
     master = TEMPLATE_DIR / "master_neutral.png"
     if not master.exists():
         return None, "Master template not approved yet"
-    body = CATEGORY_TEMPLATE_PROMPTS.get(category)
+    override = get_template_prompt_override(category)
+    body = override or CATEGORY_TEMPLATE_PROMPTS.get(category)
     if not body:
         return None, f"Unknown category: {category}"
     prompt = f"""{SYSTEM_STYLE}
 
-IMAGE 1 is the MASTER STYLE TEMPLATE (the Traveler's Compass). Match its
-exact pixel art style, lighting, contrast, and rendering quality.
+IMAGE 1 is the MASTER FLAG CANVAS — the style anchor. Match its rendering
+approach: fabric texture, pixel treatment, lighting direction, canvas
+placement. Substitute its invented design with the design described below.
 
 {body}"""
     img_bytes, err = call_openai_image(prompt, api_key, ref_paths=[str(master)])
@@ -506,6 +684,62 @@ exact pixel art style, lighting, contrast, and rendering quality.
     with open(path, "wb") as f:
         f.write(img_bytes)
     return str(path), None
+
+
+def generate_world_master(api_key):
+    """Generate the World Master — globe surrounded by a flag halo.
+    References the master dummy + up to 8 existing language flag sprites
+    so the halo reads as accurate, in-style flags."""
+    master = TEMPLATE_DIR / "master_neutral.png"
+    refs = []
+    if master.exists():
+        refs.append(str(master))
+    # Pull up to 8 already-generated language sprites as style + identity refs
+    lang_dir = SPRITES_DIR / "language"
+    if lang_dir.exists():
+        flag_pngs = sorted([f for f in lang_dir.iterdir()
+                            if f.suffix.lower() == ".png"])
+        for f in flag_pngs[:8]:
+            refs.append(str(f))
+
+    override = get_template_prompt_override("world")
+    body = override or WORLD_MASTER_DESCRIPTION
+    ref_note = ""
+    if len(refs) > 1:
+        ref_note = (f"\n\nIMAGE 1 is the MASTER DUMMY (style anchor). "
+                    f"IMAGES 2+ are already-generated national flag sprites — "
+                    f"use them as the visual source of truth for the halo's flag "
+                    f"geometry, palette, and style. The halo should include these "
+                    f"flags (plus others) in the same rendering.")
+    elif len(refs) == 1:
+        ref_note = "\n\nIMAGE 1 is the MASTER DUMMY — style anchor."
+
+    prompt = f"""{SYSTEM_STYLE}
+
+SUBJECT: {body}{ref_note}
+
+This is the WORLD MASTER for Lingua Franca — a hero/splash sprite showing the
+globe and a halo of national flags. Match the master's rendering approach."""
+
+    img_bytes, err = call_openai_image(prompt, api_key,
+                                       ref_paths=refs if refs else None,
+                                       retries=3)
+    if err:
+        return None, err
+    TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = TEMPLATE_DIR / "candidate_world.png"
+    with open(path, "wb") as f:
+        f.write(img_bytes)
+    return str(path), None
+
+
+def approve_world_master():
+    cand = TEMPLATE_DIR / "candidate_world.png"
+    if not cand.exists():
+        return False, "No candidate to approve"
+    dest = TEMPLATE_DIR / "master_world.png"
+    shutil.copy2(cand, dest)
+    return True, str(dest)
 
 
 def approve_category_template(category):
@@ -522,37 +756,66 @@ def approve_category_template(category):
 # ══════════════════════════════════════════════════════════════════
 
 def _language_prompts(item, ref_desc_has_master, ref_desc_has_subject_refs):
-    """Portrait-style prompt where flag becomes clothing, landmark becomes backdrop.
-    Returns a list of prompt variants: primary, then alt_motifs in order."""
+    """The output sprite IS the country's national flag, rendered in the
+    Lingua Franca pixel style. No characters, no portraits — just the flag
+    as cloth on a black background, faithfully reproduced.
+    Returns prompt variants: primary, then alts in order."""
+    flag = item.get("flag", {}) or {}
+    flag_desc = flag.get("desc", "").strip()
+    flag_palette = ", ".join(flag.get("palette", [])) or "match real flag"
+    flag_layout = flag.get("layout", "")
+
+    flag_block = f"""LITERAL NATIONAL FLAG — must match the REAL flag of this country EXACTLY.
+No invented designs, no artistic liberties with geometry, proportions,
+colors, or symbols. A viewer from this country must recognize it instantly.
+
+SPECIFICATION:
+{flag_desc}
+Exact palette (hex): {flag_palette}
+Layout type: {flag_layout}"""
+
     header = f"""{SYSTEM_STYLE}
 
-{'IMAGE 1 is the MASTER NEUTRAL DUMMY — a blank Player-1 traveler portrait. Match EXACTLY: pose, head size, 3/4 angle, canvas position, lighting, art style. IGNORE its placeholder gray garment — you are REPLACING it with the flag-derived clothing below.' if ref_desc_has_master else ''}
-{'IMAGES 2+ are real-world REFERENCES for this country (flag, landmark, patterns). Use them for COLOR PALETTE, FLAG GEOMETRY, and LANDMARK SHAPE — but render everything in the master art style, never photographic.' if ref_desc_has_subject_refs else ''}
+{'IMAGE 1 is the MASTER FLAG CANVAS — the style anchor. Match its rendering approach EXACTLY: fabric texture, stripe geometry, cloth waver, canvas placement, lighting direction, painterly pixel treatment. DISCARD its invented teal/cream/ochre palette and eight-point emblem — those are placeholders. Use the real palette and geometry below.' if ref_desc_has_master else ''}
+{'IMAGES 2+ are real-world REFERENCES — photographs of the actual national flag. Use them as the source of truth for GEOMETRY, STRIPE RATIOS, EMBLEM PLACEMENT, and COLORS. Render in the master pixel-art style, never photographic.' if ref_desc_has_subject_refs else ''}
 
-CHARACTER: The same blank traveler from the master dummy — same face, same head size, same pose, same lighting. The traveler does NOT change. What changes is the CLOTHING (derived from this country's flag) and the BACKGROUND MOTIF.
+{flag_block}
 
-CLOTHING — {item['name']}:
-{item['motif']}
+OUTPUT = THE FLAG ITSELF. The sprite is language-coded for {item['name']}:
+a faithful pixel-art rendition of this country's real national flag as cloth.
+
+COMPOSITION:
+- The flag fills ~80% of the canvas, centered, on solid pure-black background
+- Aspect ratio matches the real flag's official ratio (2:3, 3:5, etc. as per spec)
+- Slight fabric waver at the edges — the flag reads as cloth, not a rigid rectangle
+- Subtle cloth-texture dither across the surface, same treatment as the master canvas
+- No flagpole, no rope, no hand, no person, no character — just the flag
+- Same upper-left key light, same shadow pattern as the master
 
 CRITICAL:
-- Same face as the master dummy (ambiguous, calm, neutral expression)
-- Same head size, same pose, same 3/4 angle, same canvas placement
-- Same upper-left key light, same shadow pattern
-- Clothing replaces the master's gray placeholder garment
-- Color palette pulls from the country's flag
-- Background landmark (if described) sits softly behind the figure, NEVER dominates
-- NO text, NO country name, NO captions anywhere"""
+- Geometry must match the real flag exactly (stripe count, stripe ratios, emblem
+  position, canton placement, symbol rotation) — cross-check against the reference
+  images if provided
+- Palette must use the real flag's hex values listed above; no creative substitution
+- Painterly pixel rendering in the master's style — visible brush on fabric, crisp
+  edges on stripe boundaries
+- NO text, NO country name, NO captions anywhere in the image
+- NO people, NO characters, NO clothing, NO portraits — the sprite is purely the flag"""
 
     variants = [header]
     for alt in item.get("alt_motifs", []):
         alt_header = f"""{SYSTEM_STYLE}
 
-You are generating a portrait of the same blank traveler from the master reference, but dressed for a new country. The clothing changes to reflect this country's flag. The face, pose, lighting, and framing are IDENTICAL to the master.
+{flag_block}
 
-CLOTHING — {item['name']} (simplified):
-{alt}
+OUTPUT = the real national flag of {item['name']}, rendered as cloth in the
+Lingua Franca pixel style. Fill ~80% of canvas, centered, solid black background.
+Slight fabric waver, subtle cloth dither, upper-left key light. Aspect matches
+the real flag's official ratio. No flagpole, no character, no text.
 
-Same character, same pose, same framing — only clothing changes. No text, no labels, no country name."""
+Alternate stylistic hint (safer phrasing): {alt}
+
+Match the reference images for geometry and palette. Nothing but the flag."""
         variants.append(alt_header)
     return variants
 
@@ -756,7 +1019,7 @@ def build_manifest():
 # IMAGE SEARCH (reference-finding)
 # ══════════════════════════════════════════════════════════════════
 
-def search_images(query, max_results=24):
+def search_images(query, max_results=50):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     results = []
     try:
@@ -892,6 +1155,23 @@ def api_approve_master():
     ok, msg = approve_system_master()
     return jsonify({"ok": ok, "msg": msg})
 
+@app.route("/api/template/world/generate", methods=["POST"])
+def api_generate_world():
+    api_key = load_api_key()
+    if not api_key:
+        return jsonify({"ok": False, "msg": "No API key"}), 400
+    path, err = generate_world_master(api_key)
+    if err:
+        return jsonify({"ok": False, "msg": err}), 500
+    return jsonify({"ok": True, "path": path})
+
+
+@app.route("/api/template/world/approve", methods=["POST"])
+def api_approve_world():
+    ok, msg = approve_world_master()
+    return jsonify({"ok": ok, "msg": msg})
+
+
 @app.route("/api/template/category/generate", methods=["POST"])
 def api_generate_category_template():
     cat = request.json.get("category")
@@ -922,6 +1202,58 @@ def api_gen_sprite(category):
     if err:
         return jsonify({"ok": False, "msg": err}), 500
     return jsonify({"ok": True, "path": path})
+
+
+@app.route("/api/pipeline/run", methods=["POST"])
+def api_pipeline_run():
+    """End-to-end for one subject: (optionally) auto-collect refs, then generate.
+    Body: { category, id, n_refs?=8, skip_refs?=false, min_refs?=4 }
+    - If skip_refs=true OR the subject already has >= min_refs, refs step is skipped.
+    """
+    cat        = request.json.get("category")
+    sprite_id  = request.json.get("id")
+    n_refs     = int(request.json.get("n_refs", 8))
+    skip_refs  = bool(request.json.get("skip_refs", False))
+    min_refs   = int(request.json.get("min_refs", 4))
+    api_key    = load_api_key()
+    if not api_key:
+        return jsonify({"ok": False, "msg": "No API key"}), 400
+    if cat not in CATEGORIES:
+        return jsonify({"ok": False, "msg": f"Unknown category: {cat}"}), 400
+    item = _lookup_item(cat, sprite_id)
+    if not item:
+        return jsonify({"ok": False, "msg": f"Unknown item: {sprite_id}"}), 400
+
+    summary = {"id": sprite_id, "name": item["name"], "steps": []}
+
+    # ── Step 1: refs (optional / idempotent) ──────────────────────
+    existing_count = len(_collect_subject_refs(cat, sprite_id, max_refs=999))
+    if not skip_refs and existing_count < min_refs:
+        query = item.get("search_hint") or item["name"]
+        results = search_images(query, max_results=max(n_refs * 2, 16))
+        saved = []
+        for r in results:
+            if len(saved) >= n_refs:
+                break
+            path, err = download_ref(r.get("url", ""), cat, sprite_id)
+            if path and not err:
+                saved.append(path)
+        summary["steps"].append({"stage": "refs", "saved": len(saved),
+                                 "query": query, "had": existing_count})
+    else:
+        summary["steps"].append({"stage": "refs", "skipped": True,
+                                 "had": existing_count})
+
+    # ── Step 2: generate ──────────────────────────────────────────
+    path, err = generate_sprite(cat, sprite_id, api_key)
+    if err:
+        summary["steps"].append({"stage": "gen", "ok": False, "error": err})
+        return jsonify({"ok": False, "summary": summary, "msg": err}), 500
+    summary["steps"].append({"stage": "gen", "ok": True, "path": path})
+
+    # Refresh manifest so the app registry stays in sync
+    build_manifest()
+    return jsonify({"ok": True, "summary": summary})
 
 
 @app.route("/api/generate/batch", methods=["POST"])
@@ -980,7 +1312,30 @@ def _lookup_item(category, sprite_id):
 @app.route("/api/search", methods=["POST"])
 def api_search():
     query = request.json.get("query", "")
-    return jsonify({"ok": True, "results": search_images(query)})
+    n = int(request.json.get("n", 50))
+    return jsonify({"ok": True, "query": query,
+                    "results": search_images(query, max_results=n)})
+
+
+@app.route("/api/refs/save_batch", methods=["POST"])
+def api_save_refs_batch():
+    """Save multiple selected references in one call.
+    Body: { category, id, urls: [<url>, ...] }
+    """
+    cat = request.json.get("category")
+    sprite_id = request.json.get("id")
+    urls = request.json.get("urls", []) or []
+    if cat not in CATEGORIES:
+        return jsonify({"ok": False, "msg": f"Unknown category: {cat}"}), 400
+    saved, failed = [], []
+    for url in urls:
+        path, err = download_ref(url, cat, sprite_id)
+        if path and not err:
+            saved.append(path)
+        else:
+            failed.append({"url": url, "error": err})
+    return jsonify({"ok": True, "saved": len(saved),
+                    "failed": len(failed), "details": failed[:5]})
 
 
 @app.route("/api/refs/auto_collect", methods=["POST"])
@@ -1039,7 +1394,104 @@ def api_list_refs(category, asset_id):
         return jsonify({"refs": []})
     refs = sorted([f.name for f in ref_dir.iterdir()
                    if f.suffix.lower() in ('.jpg','.jpeg','.png','.webp')])
-    return jsonify({"refs": refs})
+    return jsonify({"refs": refs,
+                    "paths": [f"/api/refs/serve/{category}/{asset_id}/{n}" for n in refs]})
+
+
+@app.route("/api/sprite/delete", methods=["POST"])
+def api_sprite_delete():
+    """Wipe a generated sprite (both working set and public shipping copy)."""
+    cat = request.json.get("category")
+    sprite_id = request.json.get("id")
+    if cat not in CATEGORIES:
+        return jsonify({"ok": False, "msg": f"Unknown category: {cat}"}), 400
+    fn = _filename_for(cat, sprite_id)
+    removed = []
+    for path in (SPRITES_DIR / cat / fn, PUBLIC_DIR / cat / fn):
+        if path.exists() and path.is_file():
+            path.unlink()
+            removed.append(str(path))
+    # Refresh manifest so sprites.ts reflects the removal
+    build_manifest()
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.route("/api/template/config", methods=["GET"])
+def api_template_config_get():
+    """Return current template-name/prompt config (merged with defaults)."""
+    cfg = load_template_config()
+    result = {}
+    # Order: master, language, scene, utility
+    defaults = {
+        "master":   {"default_name": DEFAULT_TEMPLATE_NAMES["master"],
+                     "default_prompt": MASTER_DESCRIPTION},
+        "language": {"default_name": DEFAULT_TEMPLATE_NAMES["language"],
+                     "default_prompt": CATEGORY_TEMPLATE_PROMPTS["language"]},
+        "scene":    {"default_name": DEFAULT_TEMPLATE_NAMES["scene"],
+                     "default_prompt": CATEGORY_TEMPLATE_PROMPTS["scene"]},
+        "utility":  {"default_name": DEFAULT_TEMPLATE_NAMES["utility"],
+                     "default_prompt": CATEGORY_TEMPLATE_PROMPTS["utility"]},
+    }
+    for key, d in defaults.items():
+        entry = cfg.get(key) or {}
+        result[key] = {
+            "name":   entry.get("name")   or d["default_name"],
+            "prompt": entry.get("prompt") or d["default_prompt"],
+            "default_name":   d["default_name"],
+            "default_prompt": d["default_prompt"],
+            "custom_name":   bool(entry.get("name")),
+            "custom_prompt": bool(entry.get("prompt")),
+        }
+    return jsonify({"ok": True, "config": result})
+
+
+@app.route("/api/template/config", methods=["POST"])
+def api_template_config_set():
+    """Update template-config for one master. Body: { key, name?, prompt?, reset? }"""
+    key    = request.json.get("key")
+    name   = request.json.get("name")
+    prompt = request.json.get("prompt")
+    reset  = bool(request.json.get("reset"))
+    if key not in DEFAULT_TEMPLATE_NAMES:
+        return jsonify({"ok": False, "msg": f"Unknown key: {key}"}), 400
+    cfg = load_template_config()
+    if reset:
+        cfg.pop(key, None)
+    else:
+        entry = cfg.get(key) or {}
+        if name is not None:   entry["name"]   = name.strip() or None
+        if prompt is not None: entry["prompt"] = prompt.strip() or None
+        # prune empty
+        entry = {k: v for k, v in entry.items() if v}
+        if entry: cfg[key] = entry
+        else:     cfg.pop(key, None)
+    save_template_config(cfg)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/refs/remove", methods=["POST"])
+def api_refs_remove():
+    """Remove a single saved reference by filename.
+    Body: { category, id, filename }
+    """
+    cat = request.json.get("category")
+    sprite_id = request.json.get("id")
+    fn = request.json.get("filename", "")
+    if cat not in CATEGORIES:
+        return jsonify({"ok": False, "msg": f"Unknown category: {cat}"}), 400
+    target = REFS_DIR / cat / sprite_id / fn
+    # Safety: keep deletions inside the expected folder
+    try:
+        target = target.resolve()
+        allowed = (REFS_DIR / cat / sprite_id).resolve()
+        if allowed not in target.parents and target != allowed:
+            return jsonify({"ok": False, "msg": "Path escapes ref folder"}), 400
+    except Exception:
+        return jsonify({"ok": False, "msg": "Invalid path"}), 400
+    if target.exists() and target.is_file():
+        target.unlink()
+        return jsonify({"ok": True, "removed": fn})
+    return jsonify({"ok": False, "msg": f"Not found: {fn}"}), 404
 
 @app.route("/api/refs/serve/<category>/<asset_id>/<filename>")
 def api_serve_ref(category, asset_id, filename):

@@ -21,7 +21,7 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode } from './events';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
 import { log } from './ui';
@@ -37,6 +37,10 @@ let activeLang: LangCode = 'ja';  // default target language
 let composePhrases: { key: PhraseKey; en: string; native: string; rom: string; phon: string }[] = [];
 let aiPhrases: AIPhrase[] = [];
 let composeMode: 'template' | 'ai' = 'template';
+
+// Speak state
+let speakActive = false;
+let speakTargetLangCode: LangCode | null = null;
 
 // Quiz phone state
 let phoneQuizActive = false;
@@ -120,46 +124,8 @@ export function initDashboard(): void {
   const pushBtn = document.getElementById('compose-push');
   if (pushBtn) pushBtn.addEventListener('click', handleComposePush);
 
-  // OpenAI API key
-  const keyInput = document.getElementById('openai-key-input') as HTMLInputElement;
-  const keySave = document.getElementById('openai-key-save');
-  if (keySave && keyInput) {
-    keySave.addEventListener('click', () => {
-      const key = keyInput.value.trim();
-      setOpenAIKey(key);
-      const status = document.getElementById('openai-key-status');
-      if (status) status.textContent = key ? '✓ Key saved for this session' : 'Key cleared';
-      updateAIBadge();
-    });
-  }
-
-  // ── Command Center launch buttons ──
-  const launcherMap: Record<string, string> = {
-    'launch-container-editor': 'd3-container-editor.command',
-    'launch-sommni':           'sommni-g2-dev.command',
-    'launch-sophicon':         'sophicon-g2-dev.command',
-    'launch-sommni-proc':      'sommni-processor.command',
-    'launch-bottle-maker':     'bottle-maker.command',
-    'launch-sophicon-sprites': 'sophicon-sprites.command',
-  };
-  for (const [btnId, script] of Object.entries(launcherMap)) {
-    const btn = document.getElementById(btnId);
-    if (btn) {
-      btn.addEventListener('click', () => {
-        const cmd = `~/Desktop/launchers/${script}`;
-        log(`Launching ${script.replace('.command', '')}...`);
-        // Copy the terminal command to clipboard for easy paste
-        navigator.clipboard.writeText(cmd).then(() => {
-          btn.textContent = 'Copied!';
-          setTimeout(() => { btn.textContent = 'Launch'; }, 2000);
-          log(`Terminal command copied: ${cmd}`);
-        }).catch(() => {
-          // Fallback: show command in prompt
-          prompt('Run this in Terminal:', cmd);
-        });
-      });
-    }
-  }
+  // Speak tab — populate language picker and wire buttons
+  initSpeakTab();
 
   // Quiz start button
   const quizBtn = document.getElementById('quiz-start');
@@ -181,6 +147,7 @@ function switchTab(tab: string): void {
 
   // Refresh tab content
   if (tab === 'home') refreshHome();
+  else if (tab === 'speak') refreshSpeak();
   else if (tab === 'custom') renderGlassesPreview();
   else if (tab === 'library') refreshLibrary();
   else if (tab === 'quiz') refreshQuiz();
@@ -208,6 +175,115 @@ async function refreshHome(): Promise<void> {
 
   // Quick scenarios
   renderQuickScenarios();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SPEAK TAB — Live Conversation Mode
+// ═══════════════════════════════════════════════════════════════════
+
+function initSpeakTab(): void {
+  // Populate language picker
+  const langSelect = document.getElementById('speak-lang-select') as HTMLSelectElement;
+  if (langSelect) {
+    langSelect.innerHTML = '';
+    LANG_CODES.forEach(code => {
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = `${LANG_FLAG[code]} ${LANG_LABEL[code]}`;
+      langSelect.appendChild(opt);
+    });
+  }
+
+  // Start button
+  const startBtn = document.getElementById('speak-start-btn');
+  if (startBtn) startBtn.addEventListener('click', handleSpeakStart);
+
+  // Stop button
+  const stopBtn = document.getElementById('speak-stop-btn');
+  if (stopBtn) stopBtn.addEventListener('click', handleSpeakStop);
+}
+
+function refreshSpeak(): void {
+  // If speak is active, make sure HUD is visible
+  const selectCard = document.getElementById('speak-select-card');
+  const hud = document.getElementById('speak-hud');
+  if (selectCard) selectCard.style.display = speakActive ? 'none' : '';
+  if (hud) hud.style.display = speakActive ? '' : 'none';
+}
+
+async function handleSpeakStart(): Promise<void> {
+  const langSelect = document.getElementById('speak-lang-select') as HTMLSelectElement;
+  if (!langSelect) return;
+
+  speakTargetLangCode = langSelect.value as LangCode;
+  speakActive = true;
+
+  // Update phone UI
+  const selectCard = document.getElementById('speak-select-card');
+  const hud = document.getElementById('speak-hud');
+  if (selectCard) selectCard.style.display = 'none';
+  if (hud) hud.style.display = '';
+
+  // Set language labels
+  const theirFlag = document.getElementById('speak-their-flag');
+  const theirLang = document.getElementById('speak-their-lang');
+  if (theirFlag) theirFlag.textContent = LANG_FLAG[speakTargetLangCode] || '';
+  if (theirLang) theirLang.textContent = LANG_LABEL[speakTargetLangCode] || speakTargetLangCode;
+
+  // Set user language
+  const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement;
+  const userLangCode = (inputSelect?.value || 'en') as LangCode;
+  const yourFlag = document.getElementById('speak-your-flag');
+  const yourLang = document.getElementById('speak-your-lang');
+  if (yourFlag) yourFlag.textContent = LANG_FLAG[userLangCode] || '🇬🇧';
+  if (yourLang) yourLang.textContent = LANG_LABEL[userLangCode] || 'English';
+
+  // Initial TTS display
+  const ttsEl = document.getElementById('speak-tts-text');
+  if (ttsEl) ttsEl.textContent = 'Listening...';
+
+  // Initial suggestions
+  const sugEl = document.getElementById('speak-suggestions');
+  if (sugEl) sugEl.innerHTML = '<div class="speak-option muted">Waiting for speech...</div>';
+
+  // Push to glasses: dialogue HUD
+  await startDialogueHUD(speakTargetLangCode);
+  log(`🗣 Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
+}
+
+async function handleSpeakStop(): Promise<void> {
+  speakActive = false;
+  speakTargetLangCode = null;
+
+  // Reset phone UI
+  const selectCard = document.getElementById('speak-select-card');
+  const hud = document.getElementById('speak-hud');
+  if (selectCard) selectCard.style.display = '';
+  if (hud) hud.style.display = 'none';
+
+  // Return glasses to home
+  await endSpeakMode();
+  log('🗣 Speak: conversation ended');
+}
+
+/**
+ * Called externally (or by future mic/TTS pipeline) to update the HUD
+ * with new translated text and AI-generated response suggestions.
+ */
+export async function updateSpeakHUD(translation: string, suggestions: string[]): Promise<void> {
+  // Update phone UI
+  const ttsEl = document.getElementById('speak-tts-text');
+  if (ttsEl) ttsEl.textContent = translation;
+
+  const sugEl = document.getElementById('speak-suggestions');
+  if (sugEl) {
+    sugEl.innerHTML = suggestions.map((s, i) =>
+      `<div class="speak-option" data-speak-idx="${i}">${s}</div>`
+    ).join('');
+  }
+
+  // Update glasses HUD
+  await updateDialogueHUD(translation, suggestions);
 }
 
 function renderQuickScenarios(): void {

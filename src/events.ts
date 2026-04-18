@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // Lingua Franca — Event Handlers
-// Nav: Home (menu) → Languages → Scenario Groups → Phrase List → Detail
+// Nav: Home (menu) → Speak → Dialogue HUD (live conversation)
+//       Home → Languages → Scenario Groups → Phrase List → Detail
 //       Home → Library → Phrase Detail
 //       Home → Quiz
 // + Quiz flow on glasses
@@ -9,12 +10,14 @@
 
 import { EvenAppBridge, EvenHubEvent, OsEventTypeList } from '@evenrealities/even_hub_sdk';
 import {
-  LANG_CODES, LANG_LABEL, LANG_FLAG, PHRASE_KEYS, needsRom,
+  LANG_CODES, LANG_LABEL, LANG_FLAG, LANG_NATIVE, I_SPEAK_CODES,
+  PHRASE_KEYS, needsRom,
   langPhrase, langRom, langPhon, VOCAB,
   type LangCode, type PhraseKey, type VocabCategory, type VocabItem,
 } from './constants';
 import {
-  rebuildHomePage, buildLanguagesPage, buildLibraryPage,
+  rebuildHomePage, buildLanguagesPage, buildLibraryPage, buildMotherTonguePage,
+  buildSpeakSelectPage, buildDialogueHUDPage,
   buildScenarioGroupPage, buildPhraseListPage,
   buildPhraseDetailPage, buildQuizQuestionPage, buildQuizFeedbackPage,
   buildQuizScorePage, fillSlots, fillSlotsRom, fillSlotsPhon, fillSlotsEnglish,
@@ -27,17 +30,20 @@ import {
 import { pushLogoToGlasses, pushTextSprite } from './image-utils';
 import { initSync, getSavedPhrases, recordQuizResult, getQuizStats } from './sync';
 import { getCustomSlots, cycleSlotOption, buildCustomPhrasePage } from './custom-phrase';
+import { initAdaptiveRender, smartUpdate, snapshotTextContainers, clearSnapshot, logRenderStats } from './adaptive-render';
 import { log } from './ui';
 
 // ═══ STATE ═══
 type Page =
-  | "home" | "languages" | "library" | "groups" | "phrases" | "detail"
+  | "home" | "speak-select" | "dialogue-hud"
+  | "languages" | "library" | "groups" | "phrases" | "detail"
   | "quiz-question" | "quiz-feedback" | "quiz-score"
-  | "custom";
+  | "custom" | "mother-tongue";
 
 let currentPage: Page = "home";
 let currentLang: LangCode | null = null;
 let speakLang: string = "en";  // user's native / "I speak" language
+let speakTargetLang: LangCode | null = null;  // language of the person you're speaking with
 let currentGroupIdx: number = -1;
 let currentPhraseIdx: number = -1;
 // Detail state: filled texts for the currently displayed phrase
@@ -169,6 +175,9 @@ export function registerEventHandlers(bridge: EvenAppBridge, baseUrl: string): (
   bridgeRef = bridge;
   baseUrlRef = baseUrl;
 
+  // Initialize adaptive render engine
+  initAdaptiveRender(bridge);
+
   return bridge.onEvenHubEvent((event: EvenHubEvent) => {
     handleEvent(bridge, event, baseUrl);
   });
@@ -176,6 +185,8 @@ export function registerEventHandlers(bridge: EvenAppBridge, baseUrl: string): (
 
 // ═══ GO HOME ═══
 async function goHome(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
+  clearSnapshot();  // reset adaptive render state for new page
+  dialogueHUDReady = false;
   await bridge.rebuildPageContainer(rebuildHomePage());
   currentPage = "home";
   currentLang = null;
@@ -221,7 +232,16 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
       lastNavigationTime = Date.now();
       log("< Back to languages", "success");
     }
-    else if (currentPage === "languages" || currentPage === "library") {
+    else if (currentPage === "dialogue-hud") {
+      // Back from live conversation → speak language select
+      await bridge.rebuildPageContainer(buildSpeakSelectPage());
+      await pushLogoToGlasses(bridge, baseUrl);
+      currentPage = "speak-select";
+      speakTargetLang = null;
+      lastNavigationTime = Date.now();
+      log("< Back to speak select", "success");
+    }
+    else if (currentPage === "speak-select" || currentPage === "languages" || currentPage === "library" || currentPage === "mother-tongue") {
       await goHome(bridge, baseUrl);
     }
     // Quiz back = quit quiz
@@ -294,16 +314,23 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
   try {
     log(`[CLICK] page=${currentPage} idx=${idx}`);
 
-    // ── HOME: main menu (Languages / Library / Quiz) ──
+    // ── HOME: main menu (Speak / Languages / Library / Quiz / Settings) ──
     if (currentPage === "home") {
       if (idx === 0) {
-        // Languages
+        // Speak — select the language of the person you're talking to
+        await bridge.rebuildPageContainer(buildSpeakSelectPage());
+        await pushLogoToGlasses(bridge, baseUrl);
+        currentPage = "speak-select";
+        lastNavigationTime = Date.now();
+        log("> Speak: select language", "success");
+      } else if (idx === 1) {
+        // Languages — phrase browsing
         await bridge.rebuildPageContainer(buildLanguagesPage());
         await pushLogoToGlasses(bridge, baseUrl);
         currentPage = "languages";
         lastNavigationTime = Date.now();
         log("> Languages", "success");
-      } else if (idx === 1) {
+      } else if (idx === 2) {
         // Library — show saved phrases on glasses
         const saved = await getSavedPhrases();
         const phraseData = saved.map(p => ({ en: p.en, native: p.native }));
@@ -311,7 +338,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentPage = "library";
         lastNavigationTime = Date.now();
         log(`> Library (${saved.length} phrases)`, "success");
-      } else if (idx === 2) {
+      } else if (idx === 3) {
         // Quiz — use activeLang from dashboard, or first available
         const quizLang = currentLang || LANG_CODES[0];
         currentLang = quizLang;
@@ -328,7 +355,49 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentPage = "quiz-question";
         lastNavigationTime = Date.now();
         log(`> Quiz: ${LANG_LABEL[quizLang]}`, "success");
+      } else if (idx === 4) {
+        // Settings — Mother Tongue selector
+        await bridge.rebuildPageContainer(buildMotherTonguePage(speakLang));
+        currentPage = "mother-tongue";
+        lastNavigationTime = Date.now();
+        log("> Settings: Mother Tongue", "success");
       }
+      return;
+    }
+
+    // ── SPEAK SELECT: pick the language of who you're talking to ──
+    // Then open Dialogue HUD with mic active
+    if (currentPage === "speak-select") {
+      if (idx === LANG_CODES.length) {
+        // Back
+        navigating = false;
+        await goBack(bridge, baseUrl);
+        return;
+      }
+      if (idx >= 0 && idx < LANG_CODES.length) {
+        speakTargetLang = LANG_CODES[idx];
+        const langLabel = LANG_LABEL[speakTargetLang];
+        const langFlag = LANG_FLAG[speakTargetLang];
+        // Open Dialogue HUD — mic activates, live TTS + AI response suggestions
+        await bridge.rebuildPageContainer(buildDialogueHUDPage({
+          detectedLang: `${langFlag} ${langLabel}`,
+          translation: "Listening...",
+          suggestions: ["Waiting for speech..."],
+        }));
+        currentPage = "dialogue-hud";
+        lastNavigationTime = Date.now();
+        log(`> Dialogue HUD: ${langLabel} — mic active`, "success");
+        // TODO: activate mic, start TTS pipeline, wire AI response generation
+      }
+      return;
+    }
+
+    // ── DIALOGUE HUD: tap a suggested response ──
+    if (currentPage === "dialogue-hud") {
+      // User selected a response from the AI suggestions list
+      // TODO: speak the selected response via TTS output,
+      //       update the HUD with follow-up suggestions
+      log(`[DIALOGUE] Selected response idx=${idx}`);
       return;
     }
 
@@ -376,6 +445,29 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentPage = "detail";
         lastNavigationTime = Date.now();
         log(`> Library phrase: ${p.en.slice(0, 30)}`, "success");
+      }
+      return;
+    }
+
+    // ── MOTHER TONGUE: pick "I speak" language ──
+    if (currentPage === "mother-tongue") {
+      if (idx === I_SPEAK_CODES.length) {
+        // Back
+        navigating = false;
+        await goBack(bridge, baseUrl);
+        return;
+      }
+      if (idx >= 0 && idx < I_SPEAK_CODES.length) {
+        speakLang = I_SPEAK_CODES[idx];
+        const name = LANG_NATIVE[speakLang] || LANG_LABEL[speakLang] || speakLang;
+        log(`Mother tongue → ${name}`, "success");
+
+        // Also update the phone dashboard dropdown to stay in sync
+        const inputSelect = document.getElementById('input-lang-select') as HTMLSelectElement | null;
+        if (inputSelect) inputSelect.value = speakLang;
+
+        // Go back to home
+        await goHome(bridge, baseUrl);
       }
       return;
     }
@@ -624,8 +716,15 @@ export async function refreshGlassesForLanguageChange(learnLang: LangCode, baseU
     );
     log(`Glasses updated → ${LANG_LABEL[currentLang]} detail`, "success");
   }
+  else if (currentPage === "home") {
+    // On home: update state and rebuild home to confirm change
+    currentLang = learnLang;
+    await bridgeRef.rebuildPageContainer(rebuildHomePage());
+    await pushLogoToGlasses(bridgeRef, baseUrl);
+    log(`Language set → ${LANG_LABEL[currentLang]} (home refreshed)`, "success");
+  }
   else {
-    // On home or other pages, just update the language state
+    // Other pages: just update state
     currentLang = learnLang;
     log(`Language set → ${LANG_LABEL[currentLang]} (glasses will use on next nav)`, "success");
   }
@@ -683,4 +782,104 @@ export async function pushPhraseToGlasses(
   currentPage = "detail";
   lastNavigationTime = Date.now();
   log(`Pushed: ${key} → glasses`, "success");
+}
+
+// ═══ SPEAK MODE — start live conversation from dashboard ═══
+
+/** Start Speak mode: push speak-select page to glasses, open from dashboard */
+export async function startSpeakSelect(): Promise<void> {
+  if (!bridgeRef) { log("[SPEAK] No bridge", "error"); return; }
+  await bridgeRef.rebuildPageContainer(buildSpeakSelectPage());
+  await pushLogoToGlasses(bridgeRef, baseUrlRef);
+  currentPage = "speak-select";
+  lastNavigationTime = Date.now();
+  log("> Speak: select language (from dashboard)", "success");
+}
+
+/** Whether the Dialogue HUD layout has been established (first render done) */
+let dialogueHUDReady = false;
+
+/** Start Dialogue HUD: push live conversation page to glasses */
+export async function startDialogueHUD(targetLang: LangCode): Promise<void> {
+  if (!bridgeRef) { log("[SPEAK] No bridge", "error"); return; }
+  speakTargetLang = targetLang;
+  dialogueHUDReady = false;
+  const langLabel = LANG_LABEL[targetLang];
+  const langFlag = LANG_FLAG[targetLang];
+
+  const initialTranslation = "Listening...";
+  const initialSuggestions = ["Waiting for speech..."];
+
+  const page = buildDialogueHUDPage({
+    detectedLang: `${langFlag} ${langLabel}`,
+    translation: initialTranslation,
+    suggestions: initialSuggestions,
+  });
+
+  // First render: force full rebuild to establish the layout
+  await smartUpdate({
+    page,
+    textUpdates: [
+      { containerID: 42, containerName: "dlg-lang-name", content: `${langFlag} ${langLabel}` },
+      { containerID: 43, containerName: "dlg-tts-text", content: initialTranslation },
+    ],
+    forceRebuild: true,
+  });
+
+  // Snapshot the text containers so future updates use the fast path
+  snapshotTextContainers([
+    { containerID: 42, containerName: "dlg-lang-name", content: `${langFlag} ${langLabel}` },
+    { containerID: 43, containerName: "dlg-tts-text", content: initialTranslation },
+  ]);
+
+  dialogueHUDReady = true;
+  currentPage = "dialogue-hud";
+  lastNavigationTime = Date.now();
+  log(`> Dialogue HUD: ${langLabel} — mic active`, "success");
+}
+
+/**
+ * Update Dialogue HUD with new TTS translation and AI suggestions.
+ *
+ * ADAPTIVE RENDERING:
+ *   - If only translation text changed → textContainerUpgrade (~20fps, no flicker)
+ *   - If suggestions list changed (different count) → rebuildPageContainer (~5fps)
+ *   - Engine decides automatically via smartUpdate()
+ */
+export async function updateDialogueHUD(
+  translation: string,
+  suggestions: string[],
+): Promise<void> {
+  if (!bridgeRef || !speakTargetLang) return;
+  const langLabel = LANG_LABEL[speakTargetLang];
+  const langFlag = LANG_FLAG[speakTargetLang];
+
+  const page = buildDialogueHUDPage({
+    detectedLang: `${langFlag} ${langLabel}`,
+    translation,
+    suggestions,
+  });
+
+  // Smart update: engine will use textContainerUpgrade if only text changed,
+  // or full rebuild if the suggestion list count changed (layout shift)
+  const mode = await smartUpdate({
+    page,
+    textUpdates: [
+      { containerID: 43, containerName: "dlg-tts-text", content: translation },
+      // Note: suggestion list (containerID 45) is a ListContainer, not text —
+      // list content changes always need a full rebuild.
+      // But the TTS text (containerID 43) updates instantly via text-upgrade.
+    ],
+    forceRebuild: !dialogueHUDReady,
+  });
+
+  log(`[HUD] ${mode}: "${translation.slice(0, 35)}..." + ${suggestions.length} suggestions`);
+}
+
+/** End Speak mode: go back to home */
+export async function endSpeakMode(): Promise<void> {
+  if (!bridgeRef) return;
+  speakTargetLang = null;
+  await goHome(bridgeRef, baseUrlRef);
+  log("< Speak mode ended", "success");
 }

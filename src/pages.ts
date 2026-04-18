@@ -10,7 +10,8 @@ import {
   ImageContainerProperty, ListItemContainerProperty,
 } from '@evenrealities/even_hub_sdk';
 import {
-  LANG_CODES, LANG_LABEL, LANG_FLAG, PHRASE_KEYS, TR, TR_ROM,
+  LANG_CODES, LANG_LABEL, LANG_FLAG, LANG_NATIVE, I_SPEAK_CODES,
+  PHRASE_KEYS, TR, TR_ROM,
   VOCAB, CULTURE, needsRom, needsPhon, langPhrase, langRom, langPhon,
   uiGroupLabel, uiPhraseLabel,
   type LangCode, type PhraseKey, type VocabCategory, type VocabItem,
@@ -28,7 +29,7 @@ export const SCENARIO_GROUPS = [
 ];
 
 // ── Home menu items (main navigation) ──
-export const HOME_MENU_ITEMS = ["🌐 Languages", "📖 Library", "🧠 Quiz"];
+export const HOME_MENU_ITEMS = ["🗣 Speak", "🌐 Languages", "📖 Library", "🧠 Quiz", "⚙ Settings"];
 
 // ── Language list items (alphabetical) ──
 export const LANG_LIST_ITEMS = LANG_CODES.map(
@@ -83,16 +84,16 @@ function homeContainers() {
   });
 
   const tagLine1 = new TextContainerProperty({
-    xPosition: 297, yPosition: PANEL_TAG_Y, width: 280, height: 30,
+    xPosition: 300, yPosition: 190, width: 270, height: 30,
     containerID: 5, containerName: "tag1",
-    content: "Real-world fluency",
+    content: "Language / Done Different",
     isEventCapture: 0,
   });
 
   const tagLine2 = new TextContainerProperty({
-    xPosition: 310, yPosition: PANEL_TAG_Y + 25, width: 280, height: 30,
+    xPosition: 300, yPosition: 220, width: 270, height: 30,
     containerID: 6, containerName: "tag2",
-    content: "one scene at a time",
+    content: "Speak / See / Connect",
     isEventCapture: 0,
   });
 
@@ -116,6 +117,72 @@ export function rebuildHomePage(): RebuildPageContainer {
     listObject: [c.menuList],
     textObject: [c.tagLine1, c.tagLine2],
     imageObject: [c.logoTop, c.logoBottom],
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SPEAK — select the language of the person you're talking to
+//   Then mic opens → live TTS + AI dialogue suggestions (RPG logic)
+//
+//   Layout mirrors Languages page (split-panel pattern):
+//   2 = language list + Back (left side, scrollable)
+//   3 = logo top (right panel)
+//   4 = logo bottom (right panel)
+//   5 = context hint ("Select their language · Mic opens automatically")
+//
+//   Flow: Home → Speak → pick language → Dialogue HUD (mic active)
+//
+//   Once a language is selected, the system:
+//   · Opens the mic and begins listening
+//   · Runs live TTS on the other person's speech
+//   · Translates into the user's mother tongue
+//   · AI generates context-aware response suggestions (Elder Scrolls logic):
+//     - world state  = environment (location, event, setting)
+//     - quest state   = user's goal (rapport, negotiate, learn, etc.)
+//     - NPC disposition = social read of the person (tone, culture, status)
+//     - dialogue options = best next moves (ask / reply / support)
+//     - hidden variables = urgency, memory, relationship, cultural norms
+//   · Displays the Dialogue HUD: their speech (top) + your options (bottom)
+//   · Ring scroll to pick a response. Double-tap = dismiss / back.
+// ══════════════════════════════════════════════════════════════════
+
+export function buildSpeakSelectPage(): RebuildPageContainer {
+  const listItems = [...LANG_LIST_ITEMS, BACK_LABEL];
+
+  const langList = new ListContainerProperty({
+    xPosition: 2, yPosition: 2, width: 290, height: 254,
+    containerID: 2, containerName: "speak-lang-list",
+    itemContainer: new ListItemContainerProperty({
+      itemCount: listItems.length,
+      itemWidth: 0,
+      isItemSelectBorderEn: 1,
+      itemName: listItems,
+    }),
+    isEventCapture: 1,
+  });
+
+  const logoTop = new ImageContainerProperty({
+    xPosition: PANEL_X, yPosition: PANEL_TOP_Y, width: PANEL_W, height: PANEL_HALF_H,
+    containerID: 3, containerName: "speak-logo-top",
+  });
+
+  const logoBottom = new ImageContainerProperty({
+    xPosition: PANEL_X, yPosition: PANEL_BOT_Y, width: PANEL_W, height: PANEL_HALF_H,
+    containerID: 4, containerName: "speak-logo-bottom",
+  });
+
+  const hintText = new TextContainerProperty({
+    xPosition: PANEL_X, yPosition: PANEL_TAG_Y, width: 274, height: 50,
+    containerID: 5, containerName: "speak-hint",
+    content: "🗣 Select their language\nMic opens automatically",
+    isEventCapture: 0,
+  });
+
+  return new RebuildPageContainer({
+    containerTotalNum: 4,
+    listObject: [langList],
+    textObject: [hintText],
+    imageObject: [logoTop, logoBottom],
   });
 }
 
@@ -164,6 +231,51 @@ export function buildLanguagesPage(): RebuildPageContainer {
     listObject: [langList],
     textObject: [infoText],
     imageObject: [logoTop, logoBottom],
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MOTHER TONGUE PAGE — select "I speak" language from glasses
+//   2 = language list + Back (scrollable)
+//   3 = title text ("Select My Mother Tongue")
+// ══════════════════════════════════════════════════════════════════
+
+export const MOTHER_TONGUE_ITEMS = I_SPEAK_CODES.map(code => {
+  const flag = LANG_FLAG[code] || '';
+  const native = LANG_NATIVE[code] || LANG_LABEL[code] || code;
+  const label = LANG_LABEL[code] || code;
+  return native === label ? `${flag} ${native}` : `${flag} ${native} — ${label}`;
+});
+
+export function buildMotherTonguePage(currentSpeakLang?: string): RebuildPageContainer {
+  const listItems = [...MOTHER_TONGUE_ITEMS, BACK_LABEL];
+
+  const langList = new ListContainerProperty({
+    xPosition: 2, yPosition: 2, width: 400, height: 254,
+    containerID: 2, containerName: "tongue-list",
+    itemContainer: new ListItemContainerProperty({
+      itemCount: listItems.length,
+      itemWidth: 0,
+      isItemSelectBorderEn: 1,
+      itemName: listItems,
+    }),
+    isEventCapture: 1,
+  });
+
+  const currentFlag = LANG_FLAG[currentSpeakLang || 'en'] || '🇬🇧';
+  const currentName = LANG_NATIVE[currentSpeakLang || 'en'] || 'English';
+
+  const titleText = new TextContainerProperty({
+    xPosition: 410, yPosition: 2, width: 160, height: 80,
+    containerID: 3, containerName: "tongue-title",
+    content: `Select My\nMother Tongue\n\nCurrent:\n${currentFlag} ${currentName}`,
+    isEventCapture: 0,
+  });
+
+  return new RebuildPageContainer({
+    containerTotalNum: 2,
+    listObject: [langList],
+    textObject: [titleText],
   });
 }
 
@@ -952,5 +1064,143 @@ export function buildQuizScorePage(score: number, total: number, lang: string): 
     listObject: [],
     textObject: [scoreText, hintText],
     imageObject: [],
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DIALOGUE HUD — Real-time conversation assist (Elder Scrolls logic)
+//
+// Layout (576 × 288):
+//   ┌─────────┬──────────────────────────────────────────┐
+//   │  #41    │  #42 "SPANISH"  (detected lang, dynamic) │
+//   │  flag   │──────────────────────────────────────────│
+//   │  image  │  #43 Live TTS of their speech            │
+//   │         │  + live translation underneath           │
+//   ├─────────┼──────────────────────────────────────────┤
+//   │  #44    │  #45 Content-aware response options      │
+//   │  my     │  ▸ "What brought you to Seattle?"        │
+//   │  flag   │  ▸ "I work in hospitality and AI"        │
+//   │  image  │  ▸ "Tell me about your project"          │
+//   │         │  (scrollable list — ring scroll)         │
+//   └─────────┴──────────────────────────────────────────┘
+//
+// 5 containers:
+//   41 = detected language flag (image, top-left) — updates when lang detected
+//   42 = detected language name (text, top) — e.g. "SPANISH", changes dynamically
+//   43 = live TTS transcription + translation (text, top-right)
+//   44 = user's mother tongue flag (image, bottom-left) — from settings
+//   45 = AI response suggestions (list, bottom-right, scrollable, reactive)
+//
+// Top = what they're saying (their language, live TTS, translation)
+// Bottom = what you could say (your language, AI-generated options)
+// Ring scroll to pick a response. Double-tap = back.
+// ══════════════════════════════════════════════════════════════════
+
+// ── Dialogue HUD layout constants ──
+const DLG_IMG_W    = 80;     // width of flag/sprite images
+const DLG_IMG_H    = 80;     // height of flag/sprite images
+const DLG_PAD      = 4;      // edge padding
+const DLG_GAP      = 4;      // gap between image and text area
+const DLG_TOP_H    = 138;    // height of top zone (their speech)
+const DLG_DIVIDER  = 12;     // divider gap between zones
+const DLG_TEXT_X   = DLG_PAD + DLG_IMG_W + DLG_GAP;  // 88
+const DLG_TEXT_W   = 576 - DLG_TEXT_X - DLG_PAD;      // 484
+const DLG_LABEL_H  = 28;     // language label height
+const DLG_BOT_Y    = DLG_PAD + DLG_TOP_H + DLG_DIVIDER;   // 154
+const DLG_BOT_H    = 288 - DLG_BOT_Y - DLG_PAD;           // 130 (fits within display)
+
+export interface DialogueHUDOptions {
+  /** Detected language label, e.g. "Dutch", "Indonesian" */
+  detectedLang: string;
+  /** Live TTS translation of what the other person said */
+  translation: string;
+  /** AI-generated response suggestions (3–5 options) */
+  suggestions: string[];
+  /** Optional: user's language label, e.g. "English" */
+  userLang?: string;
+}
+
+export function buildDialogueHUDPage(opts: DialogueHUDOptions): RebuildPageContainer {
+  const {
+    detectedLang,
+    translation,
+    suggestions,
+    userLang = 'English',
+  } = opts;
+
+  // ── Top zone: their speech ──
+
+  // #41 — Detected language flag (top-left, updates when lang detected)
+  const langSprite = new ImageContainerProperty({
+    xPosition: DLG_PAD,
+    yPosition: DLG_PAD,
+    width: DLG_IMG_W,
+    height: DLG_IMG_H,
+    containerID: 41,
+    containerName: "dlg-lang-flag",
+  });
+
+  // #42 — Detected language name (dynamic — "SPANISH", "DUTCH", etc.)
+  const langLabel = new TextContainerProperty({
+    xPosition: DLG_TEXT_X,
+    yPosition: DLG_PAD,
+    width: DLG_TEXT_W,
+    height: DLG_LABEL_H,
+    containerID: 42,
+    containerName: "dlg-lang-name",
+    content: detectedLang,
+    isEventCapture: 0,
+    borderWidth: 0,
+  });
+
+  // #43 — Live TTS transcription + translation (top-right, below lang name)
+  const ttsText = new TextContainerProperty({
+    xPosition: DLG_TEXT_X,
+    yPosition: DLG_PAD + DLG_LABEL_H,
+    width: DLG_TEXT_W,
+    height: DLG_TOP_H - DLG_LABEL_H,
+    containerID: 43,
+    containerName: "dlg-tts-text",
+    content: translation,
+    isEventCapture: 0,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingLength: 4,
+  });
+
+  // ── Bottom zone: your responses ──
+
+  // #44 — User's mother tongue flag (bottom-left, from settings or detection)
+  const userSprite = new ImageContainerProperty({
+    xPosition: DLG_PAD,
+    yPosition: DLG_BOT_Y,
+    width: DLG_IMG_W,
+    height: DLG_IMG_H,
+    containerID: 44,
+    containerName: "dlg-user-flag",
+  });
+
+  // #45 — Content-aware response suggestions (scrollable, reactive)
+  const responseList = new ListContainerProperty({
+    xPosition: DLG_TEXT_X,
+    yPosition: DLG_BOT_Y,
+    width: DLG_TEXT_W,
+    height: DLG_BOT_H,
+    containerID: 45,
+    containerName: "dlg-responses",
+    itemContainer: new ListItemContainerProperty({
+      itemCount: suggestions.length,
+      itemWidth: 0,
+      isItemSelectBorderEn: 1,
+      itemName: suggestions,
+    }),
+    isEventCapture: 1,  // reactive — ring scroll to select
+  });
+
+  return new RebuildPageContainer({
+    containerTotalNum: 5,
+    listObject: [responseList],
+    textObject: [langLabel, ttsText],
+    imageObject: [langSprite, userSprite],
   });
 }
