@@ -209,6 +209,8 @@ export interface AppSettings {
   showRomanization: boolean;
   quizDifficulty: "easy" | "medium" | "hard";
   theme: string;  // "somni" default
+  openaiKey: string;  // OpenAI API key for GPT response suggestions
+  pulseKey: string;   // Smallest.ai API key for Pulse STT
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -217,6 +219,8 @@ export async function getSettings(): Promise<AppSettings> {
     showRomanization: true,
     quizDifficulty: "medium",
     theme: "somni",
+    openaiKey: "",
+    pulseKey: "sk_db0038780e2bb52b5b1259ae0b8710a4",
   });
 }
 

@@ -21,9 +21,10 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, type GlassesPageState } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, type GlassesPageState } from './events';
+import { sendAudioChunk, onPulseResult, startPulseStream, stopPulseStream, flushAudioBuffer, setPulseKey, hasPulseKey, getPulseKey, type PulseResult } from './pulse-stt';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
-import { setOpenAIKey, hasOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
+import { setOpenAIKey, hasOpenAIKey, getOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
 import { log } from './ui';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -138,7 +139,7 @@ export function initDashboard(): void {
       log(`Theme → ${theme}`);
     });
   });
-  // Restore saved theme on load
+  // Restore saved theme + API keys on load
   getSettings().then(s => {
     if (s.theme) {
       document.body.dataset.theme = s.theme;
@@ -146,10 +147,104 @@ export function initDashboard(): void {
         b.classList.toggle('active', (b as HTMLElement).dataset.theme === s.theme);
       });
     }
+    if (s.openaiKey) {
+      setOpenAIKey(s.openaiKey);
+      const keyInput = document.getElementById('settings-api-key') as HTMLInputElement;
+      if (keyInput) keyInput.value = s.openaiKey;
+    }
+    if (s.pulseKey) {
+      setPulseKey(s.pulseKey);
+      const pulseInput = document.getElementById('settings-pulse-key') as HTMLInputElement;
+      if (pulseInput) pulseInput.value = s.pulseKey;
+    }
   });
+
+  // Pulse API key input
+  const pulseKeyInput = document.getElementById('settings-pulse-key') as HTMLInputElement;
+  const pulseKeySaveBtn = document.getElementById('settings-pulse-key-save');
+  if (pulseKeySaveBtn && pulseKeyInput) {
+    pulseKeySaveBtn.addEventListener('click', async () => {
+      const key = pulseKeyInput.value.trim();
+      setPulseKey(key);
+      await saveSettings({ pulseKey: key });
+      log(key ? 'Pulse STT key saved' : 'Pulse STT key cleared');
+    });
+  }
+
+  // OpenAI API key input
+  const keyInput = document.getElementById('settings-api-key') as HTMLInputElement;
+  const keySaveBtn = document.getElementById('settings-api-key-save');
+  if (keySaveBtn && keyInput) {
+    keySaveBtn.addEventListener('click', async () => {
+      const key = keyInput.value.trim();
+      setOpenAIKey(key);
+      await saveSettings({ openaiKey: key });
+      log(key ? 'OpenAI key saved' : 'OpenAI key cleared');
+    });
+  }
 
   // Subscribe to glasses page state changes — mirror on webapp
   onGlassesPageChange(handleGlassesPageChange);
+
+  // ── Pulse STT pipeline: glasses mic → Pulse WebSocket → HUD ──
+  // Stream raw PCM chunks directly to Pulse for real-time transcription
+  onGlassesAudio((pcm) => {
+    if (!speakActive) return;
+    sendAudioChunk(pcm);
+  });
+
+  // When Pulse returns a transcription, update both phone HUD + glasses HUD
+  let pulseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastPulseText = '';
+
+  onPulseResult(async (result: PulseResult) => {
+    if (!speakActive || !speakTargetLangCode) return;
+
+    const displayText = result.text;
+
+    // Update phone UI immediately with transcription
+    const ttsEl = document.getElementById('speak-tts-text');
+    if (ttsEl) ttsEl.textContent = displayText;
+
+    // Update glasses HUD with live transcription
+    await updateDialogueHUD(displayText, ['Listening...'], result.language !== 'unknown' ? result.language : undefined);
+
+    // Debounce AI response generation — wait for speech to settle (1.5s pause)
+    // to avoid hammering GPT on every partial transcription
+    if (pulseDebounceTimer) clearTimeout(pulseDebounceTimer);
+
+    if (result.text !== lastPulseText && result.text.trim().length > 5) {
+      lastPulseText = result.text;
+
+      pulseDebounceTimer = setTimeout(async () => {
+        if (!speakActive || !speakTargetLangCode) return;
+
+        log(`[STT] ${result.language}: "${result.text.slice(0, 40)}..."`);
+
+        // Update glasses with "Thinking..." while GPT generates
+        await updateDialogueHUD(displayText, ['Thinking...'], result.language !== 'unknown' ? result.language : undefined);
+
+        // Generate AI response suggestions
+        const whisperCompat = {
+          text: result.text,
+          language: result.language,
+          translation: undefined as string | undefined,
+        };
+        const suggestions = await generateQuickResponses(whisperCompat, speakTargetLangCode!);
+
+        // Update phone suggestions
+        const sugEl = document.getElementById('speak-suggestions');
+        if (sugEl) {
+          sugEl.innerHTML = suggestions.map((s: string, i: number) =>
+            `<div class="speak-option" data-speak-idx="${i}">${escHtml(s)}</div>`
+          ).join('');
+        }
+
+        // Push final suggestions to glasses
+        await updateDialogueHUD(displayText, suggestions, result.language !== 'unknown' ? result.language : undefined);
+      }, 1500);
+    }
+  });
 
   // Global event delegation
   document.addEventListener('click', handleGlobalClick);
@@ -510,6 +605,14 @@ async function handleSpeakStart(): Promise<void> {
 
   // Push to glasses: dialogue HUD
   await startDialogueHUD(speakTargetLangCode);
+
+  // Start Pulse STT stream (connects WebSocket for real-time transcription)
+  if (hasPulseKey()) {
+    startPulseStream();
+  } else {
+    log('Set your Smallest.ai API key in Settings for live STT', 'error');
+  }
+
   log(`Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
 }
 
@@ -517,15 +620,104 @@ async function handleSpeakStop(): Promise<void> {
   speakActive = false;
   speakTargetLangCode = null;
 
+  // Stop Pulse STT stream
+  flushAudioBuffer();
+  stopPulseStream();
+
   // Reset phone UI
   const selectCard = document.getElementById('speak-select-card');
   const hud = document.getElementById('speak-hud');
   if (selectCard) selectCard.style.display = '';
   if (hud) hud.style.display = 'none';
 
+  // Reset conversation history
+  conversationHistory = [];
+
   // Return glasses to home
   await endSpeakMode();
   log('Speak: conversation ended');
+}
+
+// Conversation history for GPT context
+let conversationHistory: { role: string; text: string; lang: string }[] = [];
+
+/**
+ * Generate AI-powered response suggestions using GPT.
+ * Takes the Whisper transcription and generates contextual things to say back
+ * in the target language.
+ */
+async function generateQuickResponses(result: { text: string; language: string; translation?: string }, targetLang: LangCode): Promise<string[]> {
+  // Add to conversation history
+  conversationHistory.push({
+    role: 'them',
+    text: result.text,
+    lang: result.language,
+  });
+  // Keep last 10 exchanges for context
+  if (conversationHistory.length > 10) conversationHistory = conversationHistory.slice(-10);
+
+  const apiKey = getOpenAIKey();
+  if (!apiKey) {
+    // Fallback: simple template responses
+    return [
+      `Yes, I understand`,
+      `Can you repeat that?`,
+      `Tell me more`,
+    ];
+  }
+
+  try {
+    const targetName = LANG_LABEL[targetLang] || targetLang;
+    const speakName = LANG_LABEL[currentSpeakLang] || 'English';
+    const recentContext = conversationHistory.map(h =>
+      `${h.role === 'them' ? 'Them' : 'You'}: ${h.text}`
+    ).join('\n');
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 300,
+        temperature: 0.8,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a real-time conversation assistant for smart glasses. The user speaks ${speakName} and is talking to someone who speaks ${targetName}.
+
+Given the conversation so far, suggest 3 SHORT responses the user could say next. Each response should be in ${targetName} with ${speakName} translation in parentheses.
+
+Format: one response per line, like:
+${targetName} phrase (${speakName} translation)
+
+Keep responses natural, casual, and contextually relevant. Max 10 words each.`,
+          },
+          {
+            role: 'user',
+            content: `Conversation:\n${recentContext}\n\nSuggest 3 responses I could say:`,
+          },
+        ],
+      }),
+    });
+
+    if (!resp.ok) return fallbackResponses();
+
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    const lines = content.split('\n').filter((l: string) => l.trim().length > 0).slice(0, 3);
+
+    return lines.length > 0 ? lines : fallbackResponses();
+  } catch (e) {
+    console.warn('[LF] GPT response error:', e);
+    return fallbackResponses();
+  }
+}
+
+function fallbackResponses(): string[] {
+  return ['Yes, I understand', 'Can you say that again?', 'Tell me more'];
 }
 
 /**

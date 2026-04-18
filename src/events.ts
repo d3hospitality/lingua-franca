@@ -163,14 +163,27 @@ function getDetailSlotLabels(lang: LangCode): string[] {
   });
 }
 
-// Language page scroll state — tracks which language is highlighted
+// Scroll highlight state — tracks which list item is highlighted on each page
 let langHighlightIdx = 0;
+let groupHighlightIdx = 0;
+let phraseHighlightIdx = 0;
 let lastSpriteUpdateMs = 0;
 const SPRITE_DEBOUNCE_MS = 150;  // don't re-push sprites faster than this
 
 let navigating = false;
 let lastNavigationTime = 0;
 const NAV_DEBOUNCE_MS = 500;
+
+// Mic / audio state
+let micActive = false;
+type AudioCallback = (pcm: Uint8Array) => void;
+let audioListeners: AudioCallback[] = [];
+
+/** Subscribe to raw PCM audio from glasses mic (each chunk ~3200 bytes / 100ms) */
+export function onGlassesAudio(cb: AudioCallback): () => void {
+  audioListeners.push(cb);
+  return () => { audioListeners = audioListeners.filter(l => l !== cb); };
+}
 
 let bridgeRef: EvenAppBridge | null = null;
 let baseUrlRef = "";
@@ -221,6 +234,7 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
       log("< Back to phrases", "success");
     }
     else if (currentPage === "phrases" && currentLang) {
+      groupHighlightIdx = 0;
       await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
       await pushGroupsSprite(bridge, baseUrl, currentLang);
       currentPage = "groups";
@@ -244,6 +258,11 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
       log("< Back to languages", "success");
     }
     else if (currentPage === "dialogue-hud") {
+      // Stop mic before leaving dialogue
+      if (micActive && bridge) {
+        bridge.audioControl(false).catch(() => {});
+        micActive = false;
+      }
       // Back from live conversation → speak language select
       langHighlightIdx = 0;
       await bridge.rebuildPageContainer(buildSpeakSelectPage(0));
@@ -408,10 +427,21 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
           translation: "Listening...",
           suggestions: ["Waiting for speech..."],
         }));
+
+        // Push language flag sprites for both speakers
+        await pushDialogueSprites(bridge, baseUrl, speakTargetLang!, speakLang);
+
         currentPage = "dialogue-hud";
         lastNavigationTime = Date.now();
-        log(`> Dialogue HUD: ${langLabel} — mic active`, "success");
-        // TODO: activate mic, start TTS pipeline, wire AI response generation
+
+        // Start mic capture
+        try {
+          await bridge.audioControl(true);
+          micActive = true;
+          log(`> Dialogue HUD: ${langLabel} — mic ON`, "success");
+        } catch (e) {
+          log(`[MIC] Failed to start: ${e}`, "error");
+        }
       }
       return;
     }
@@ -435,6 +465,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
       }
       if (idx >= 0 && idx < LANG_CODES.length) {
         currentLang = LANG_CODES[idx];
+        groupHighlightIdx = 0;
         await bridge.rebuildPageContainer(buildScenarioGroupPage(currentLang, speakLang));
         await pushGroupsSprite(bridge, baseUrl, currentLang);
         currentPage = "groups";
@@ -506,6 +537,7 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
       }
       if (idx >= 0 && idx < SCENARIO_GROUPS.length) {
         currentGroupIdx = idx;
+        phraseHighlightIdx = 0;
         await bridge.rebuildPageContainer(buildPhraseListPage(currentLang, currentGroupIdx, speakLang));
         await pushPhrasesSprite(bridge, baseUrl, currentGroupIdx);
         currentPage = "phrases";
@@ -663,6 +695,19 @@ async function handleScroll(
 // ═══ EVENT DISPATCHER ═══
 async function handleEvent(bridge: EvenAppBridge, event: EvenHubEvent, baseUrl: string): Promise<void> {
 
+  // Audio events — PCM data from glasses 4-mic array (16kHz, 16-bit LE, mono)
+  // Stream each chunk directly to listeners (Pulse handles buffering internally)
+  if ((event as any).audioEvent) {
+    const pcm = (event as any).audioEvent.audioPcm as Uint8Array;
+    if (pcm && pcm.length > 0 && micActive) {
+      // Forward every chunk immediately — Pulse STT streams in real-time
+      for (const cb of audioListeners) {
+        try { cb(pcm); } catch (e) { console.warn('[LF] Audio listener error:', e); }
+      }
+    }
+    return;
+  }
+
   // List events (click / scroll on list containers)
   if (event.listEvent) {
     const le = event.listEvent;
@@ -722,6 +767,37 @@ async function handleEvent(bridge: EvenAppBridge, event: EvenHubEvent, baseUrl: 
           notifyPageChange();
         }
       }
+
+      // On groups page, scroll = update scene sprite for highlighted group
+      if (currentPage === "groups") {
+        if (type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+          groupHighlightIdx = Math.min(groupHighlightIdx + 1, SCENARIO_GROUPS.length - 1);
+        } else {
+          groupHighlightIdx = Math.max(groupHighlightIdx - 1, 0);
+        }
+
+        const now = Date.now();
+        if (now - lastSpriteUpdateMs >= SPRITE_DEBOUNCE_MS) {
+          lastSpriteUpdateMs = now;
+          // Push the scene sprite for the highlighted group
+          pushPhrasesSprite(bridge, baseUrl, groupHighlightIdx).catch(() => {});
+          log(`Scroll → ${SCENARIO_GROUPS[groupHighlightIdx].label}`);
+          notifyPageChange();
+        }
+      }
+
+      // On phrases page, scroll = update language flag for current lang
+      // (sprite stays consistent since we're within a single group)
+      if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
+        const group = SCENARIO_GROUPS[currentGroupIdx];
+        if (type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+          phraseHighlightIdx = Math.min(phraseHighlightIdx + 1, group.keys.length - 1);
+        } else {
+          phraseHighlightIdx = Math.max(phraseHighlightIdx - 1, 0);
+        }
+        notifyPageChange();
+      }
+
       return;
     }
 
@@ -910,7 +986,15 @@ export async function startDialogueHUD(targetLang: LangCode): Promise<void> {
   dialogueHUDReady = true;
   currentPage = "dialogue-hud";
   lastNavigationTime = Date.now();
-  log(`> Dialogue HUD: ${langLabel} — mic active`, "success");
+
+  // Start microphone capture from glasses 4-mic array
+  try {
+    await bridgeRef.audioControl(true);
+    micActive = true;
+    log(`> Dialogue HUD: ${langLabel} — mic ON`, "success");
+  } catch (e) {
+    log(`[MIC] Failed to start: ${e}`, "error");
+  }
 }
 
 /** Track the last detected language so we only re-push sprite when it changes */
@@ -969,9 +1053,19 @@ export async function updateDialogueHUD(
   log(`[HUD] ${mode}: "${translation.slice(0, 35)}..." + ${suggestions.length} suggestions`);
 }
 
-/** End Speak mode: go back to home */
+/** End Speak mode: stop mic, go back to home */
 export async function endSpeakMode(): Promise<void> {
   if (!bridgeRef) return;
+
+  // Stop microphone
+  if (micActive) {
+    try {
+      await bridgeRef.audioControl(false);
+    } catch (e) { /* ignore */ }
+    micActive = false;
+    log("[MIC] Stopped", "success");
+  }
+
   speakTargetLang = null;
   lastDetectedLang = null;
   await goHome(bridgeRef, baseUrlRef);
@@ -1027,12 +1121,21 @@ function notifyPageChange(): void {
     state.highlightIdx = langHighlightIdx;
   }
   else if (currentPage === "groups" && currentLang) {
-    state.spriteUrl = `${baseUrl}sprites/language/lang-${currentLang}.png`;
+    // Sprite updates dynamically on scroll via groupHighlightIdx
+    const sceneMap: Record<number, string> = {
+      0: 'scene-social', 1: 'scene-food', 2: 'scene-compliment',
+      3: 'scene-navigate', 4: 'scene-formal',
+    };
+    const sceneName = sceneMap[groupHighlightIdx];
+    state.spriteUrl = sceneName
+      ? `${baseUrl}sprites/scene/${sceneName}.png`
+      : `${baseUrl}sprites/language/lang-${currentLang}.png`;
     state.groupIdx = currentGroupIdx;
+    state.highlightIdx = groupHighlightIdx;
+    state.groupLabel = SCENARIO_GROUPS[groupHighlightIdx]?.label;
     state.listItems = SCENARIO_GROUPS.map(g => g.label);
   }
   else if (currentPage === "phrases" && currentLang && currentGroupIdx >= 0) {
-    // Map group index to scene sprite
     const sceneMap: Record<number, string> = {
       0: 'scene-social', 1: 'scene-food', 2: 'scene-compliment',
       3: 'scene-navigate', 4: 'scene-formal',
@@ -1043,6 +1146,8 @@ function notifyPageChange(): void {
       : `${baseUrl}sprites/candidate_scene.png`;
     state.groupIdx = currentGroupIdx;
     state.groupLabel = SCENARIO_GROUPS[currentGroupIdx]?.label;
+    state.highlightIdx = phraseHighlightIdx;
+    state.listItems = SCENARIO_GROUPS[currentGroupIdx].keys.map(k => k);
   }
   else if (currentPage === "detail" && currentLang && detailKey) {
     state.phraseKey = detailKey;

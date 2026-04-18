@@ -52,6 +52,10 @@ export function hasOpenAIKey(): boolean {
   return apiKey.length > 0;
 }
 
+export function getOpenAIKey(): string {
+  return apiKey;
+}
+
 const SYSTEM_PROMPT = `You are a language learning phrase generator for smart glasses. Given a scenario description and a target language, generate 5 practical phrases a traveler would need.
 
 RULES:
