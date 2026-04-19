@@ -210,7 +210,7 @@ export interface AppSettings {
   quizDifficulty: "easy" | "medium" | "hard";
   theme: string;  // "somni" default
   openaiKey: string;  // OpenAI API key for GPT response suggestions
-  pulseKey: string;   // Smallest.ai API key for Pulse STT
+  pulseKey: string;   // Deepgram API key for live STT
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -220,7 +220,7 @@ export async function getSettings(): Promise<AppSettings> {
     quizDifficulty: "medium",
     theme: "somni",
     openaiKey: "",
-    pulseKey: "sk_db0038780e2bb52b5b1259ae0b8710a4",
+    pulseKey: "7fa17b63f8de9ad80f94aac53e43c7f39b475166",
   });
 }
 

@@ -702,7 +702,7 @@ async function handleScroll(
 async function handleEvent(bridge: EvenAppBridge, event: EvenHubEvent, baseUrl: string): Promise<void> {
 
   // Audio events — PCM data from glasses 4-mic array (16kHz, 16-bit LE, mono)
-  // Stream each chunk directly to listeners (Pulse handles buffering internally)
+  // Stream each chunk directly to listeners (Deepgram handles buffering internally)
   // NOTE: SDK sends audioPcm as number[] after JSON serialization, not a real Uint8Array.
   //       Always wrap with new Uint8Array() to ensure correct binary type.
   if (event.audioEvent) {

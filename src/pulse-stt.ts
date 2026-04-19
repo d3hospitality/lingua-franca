@@ -1,11 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════
-// Lingua Franca — Pulse STT (Smallest.ai WebSocket Streaming)
-// Real-time speech-to-text via wss://api.smallest.ai/waves/v1/pulse
-// Replaces Whisper REST API with sub-70ms streaming transcription.
+// Lingua Franca — Deepgram STT (Live WebSocket Streaming)
+// Real-time speech-to-text via wss://api.deepgram.com/v1/listen
+// Replaced Smallest.ai Pulse — Deepgram supports browser WebSocket
+// natively (no proxy required, auth via query param).
 //
 // Audio format: linear16 (signed 16-bit LE), 16kHz, mono
 // Chunk size: 4096 bytes (~128ms of audio), streamed in real-time
-// Supports 30+ languages with auto-detect (language=multi)
+// Model: nova-3 (latest, supports 30+ languages)
 // ═══════════════════════════════════════════════════════════════════
 
 import { log } from './ui';
@@ -16,7 +17,7 @@ import { log } from './ui';
 
 export interface PulseResult {
   text: string;           // transcription in the spoken language
-  language: string;       // detected language code (from Pulse or inferred)
+  language: string;       // detected language code
   isFinal: boolean;       // whether this is a final (settled) transcription
 }
 
@@ -32,6 +33,7 @@ let connected = false;
 let listeners: STTCallback[] = [];
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingChunks: Uint8Array[] = [];  // buffer chunks while connecting
+let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
 // Accumulate partial transcriptions into a rolling transcript
 let currentTranscript = '';
@@ -50,7 +52,7 @@ export function onPulseResult(cb: STTCallback): () => void {
 
 export function setPulseKey(key: string): void {
   apiKey = key;
-  log(key ? 'Pulse API key set' : 'Pulse API key cleared');
+  log(key ? 'Deepgram API key set' : 'Deepgram API key cleared');
 }
 
 export function hasPulseKey(): boolean {
@@ -63,47 +65,35 @@ export function getPulseKey(): string {
 
 // ═══════════════════════════════════════════════════════════════════
 // WEBSOCKET CONNECTION
-// Opens a streaming WebSocket to Pulse STT.
-// Audio chunks are sent as binary frames; transcription results
-// come back as JSON text frames: {"transcription": "..."}
+// Deepgram live streaming: wss://api.deepgram.com/v1/listen
+// Auth: token query param (works in browsers — no proxy needed!)
+// Response: {"type":"Results","channel":{"alternatives":[{"transcript":"..."}]}}
 // ═══════════════════════════════════════════════════════════════════
 
-const PULSE_DIRECT_URL = 'wss://api.smallest.ai/waves/v1/pulse/get_text';
-
 /**
- * Build the WebSocket URL for Pulse STT.
- * In development (Vite dev server), route through /pulse-proxy which adds
- * the Authorization header server-side. In production, use a deployed proxy
- * (set VITE_PULSE_PROXY_URL env var) or fall back to direct (will 401).
+ * Build the Deepgram WebSocket URL.
+ * Unlike Smallest.ai, Deepgram supports browser WebSocket auth
+ * via query parameter — no server-side proxy needed.
  */
-function buildPulseUrl(): string {
+function buildDeepgramUrl(): string {
   const params = new URLSearchParams({
+    model: 'nova-3',
+    language: 'multi',           // auto-detect language
     encoding: 'linear16',
     sample_rate: '16000',
-    language: 'multi',           // auto-detect from 30+ languages
-    token: apiKey,               // proxy reads this; stripped before upstream
+    channels: '1',
+    punctuate: 'true',
+    interim_results: 'true',     // get partial transcriptions
+    smart_format: 'true',        // auto-format numbers, dates, etc.
+    token: apiKey,               // Deepgram supports token as query param
   });
 
-  // Dev server proxy — same host, /pulse-proxy path
-  if (location.protocol === 'http:' || location.hostname === 'localhost') {
-    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${wsProto}://${location.host}/pulse-proxy?${params.toString()}`;
-  }
-
-  // Production proxy (Cloudflare Worker, etc.)
-  const proxyUrl = (import.meta as any).env?.VITE_PULSE_PROXY_URL;
-  if (proxyUrl) {
-    return `${proxyUrl}?${params.toString()}`;
-  }
-
-  // Fallback: direct connection (will fail in browser due to missing Authorization header)
-  log('[Pulse] WARNING: No proxy configured — direct WS will likely 401', 'error');
-  return `${PULSE_DIRECT_URL}?${params.toString()}`;
+  return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 }
 
 export function startPulseStream(): void {
   if (!apiKey) {
-    log('[Pulse] No API key — set it in Settings', 'error');
+    log('[Deepgram] No API key — set it in Settings', 'error');
     return;
   }
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -116,15 +106,23 @@ export function startPulseStream(): void {
   chunkBuffer = new Uint8Array(0);
   pendingChunks = [];
 
-  const url = buildPulseUrl();
-  log('[Pulse] Connecting...');
+  const url = buildDeepgramUrl();
+  log('[Deepgram] Connecting...');
 
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
     connected = true;
-    log('[Pulse] Connected — streaming', 'success');
+    log('[Deepgram] Connected — streaming', 'success');
+
+    // Start keep-alive heartbeat (Deepgram closes after 10s of no data)
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
+    keepAliveTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'KeepAlive' }));
+      }
+    }, 5000);  // every 5 seconds
 
     // Flush any chunks that arrived while connecting
     for (const chunk of pendingChunks) {
@@ -139,8 +137,14 @@ export function startPulseStream(): void {
     try {
       const data = JSON.parse(event.data as string);
 
-      // Smallest.ai response: {"transcript": "...", "is_final": true/false, ...}
-      const text = data.transcript || data.transcription || data.text || '';
+      // Deepgram response format:
+      // {"type":"Results","channel":{"alternatives":[{"transcript":"...","confidence":0.99}]},"is_final":true,"speech_final":true}
+      if (data.type !== 'Results') return;
+
+      const alt = data.channel?.alternatives?.[0];
+      if (!alt) return;
+
+      const text = alt.transcript || '';
       if (!text.trim()) return;
 
       const now = Date.now();
@@ -154,42 +158,51 @@ export function startPulseStream(): void {
       // Update rolling transcript
       currentTranscript = text;
 
-      // Detect language from response if available
-      const detectedLang = data.language || data.detected_language || 'unknown';
+      // Detect language from response metadata
+      const detectedLang = data.metadata?.detected_language
+        || data.channel?.detected_language
+        || 'unknown';
 
       const result: PulseResult = {
         text: currentTranscript,
         language: detectedLang,
-        isFinal: data.is_final !== false,  // default to final if not specified
+        isFinal: data.is_final === true,
       };
 
       // Notify all listeners
       for (const cb of listeners) {
-        try { cb(result); } catch (e) { console.warn('[Pulse] Listener error:', e); }
+        try { cb(result); } catch (e) { console.warn('[Deepgram] Listener error:', e); }
       }
     } catch (e) {
-      // Non-JSON message or parse error — could be a status message
+      // Non-JSON message or parse error
       const msg = typeof event.data === 'string' ? event.data : '';
-      if (msg) log(`[Pulse] ${msg.slice(0, 80)}`);
+      if (msg) log(`[Deepgram] ${msg.slice(0, 80)}`);
     }
   };
 
   ws.onerror = (event) => {
-    log('[Pulse] WebSocket error', 'error');
-    console.error('[Pulse] WS error:', event);
+    log('[Deepgram] WebSocket error', 'error');
+    console.error('[Deepgram] WS error:', event);
   };
 
   ws.onclose = (event) => {
     connected = false;
     ws = null;
-    log(`[Pulse] Disconnected (code: ${event.code})`);
+
+    // Stop keep-alive
+    if (keepAliveTimer) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+
+    log(`[Deepgram] Disconnected (code: ${event.code})`);
 
     // Auto-reconnect if we still have an API key (wasn't intentionally stopped)
     if (apiKey && !reconnectTimer) {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (apiKey) {
-          log('[Pulse] Reconnecting...');
+          log('[Deepgram] Reconnecting...');
           startPulseStream();
         }
       }, 2000);
@@ -197,17 +210,21 @@ export function startPulseStream(): void {
   };
 }
 
-/** Stop the Pulse WebSocket stream */
+/** Stop the Deepgram WebSocket stream */
 export function stopPulseStream(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+  }
   if (ws) {
-    // Send finalize signal before closing (tells Pulse to flush final transcript)
+    // Send CloseStream signal before closing (tells Deepgram to flush final transcript)
     try {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'finalize' }));
+        ws.send(JSON.stringify({ type: 'CloseStream' }));
       }
     } catch { /* ignore */ }
 
@@ -218,26 +235,25 @@ export function stopPulseStream(): void {
   connected = false;
   pendingChunks = [];
   currentTranscript = '';
-  log('[Pulse] Stream stopped');
+  log('[Deepgram] Stream stopped');
 }
 
-/** Whether the Pulse stream is active */
+/** Whether the Deepgram stream is active */
 export function isPulseActive(): boolean {
   return connected && ws !== null && ws.readyState === WebSocket.OPEN;
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SEND AUDIO — stream raw PCM chunks to Pulse
+// SEND AUDIO — stream raw PCM chunks to Deepgram
 // Called by the glasses audio event handler with each PCM chunk.
-// Pulse expects 4096-byte chunks at 50-100ms intervals.
-// The glasses send ~3200 bytes/100ms (16kHz * 2 bytes * 0.1s),
-// so we accumulate to 4096 before sending.
+// Deepgram accepts any chunk size, but we buffer to 4096 for
+// consistency with the glasses 4-mic array output.
 // ═══════════════════════════════════════════════════════════════════
 
 let chunkBuffer = new Uint8Array(0);
-const PULSE_CHUNK_SIZE = 4096;
+const CHUNK_SIZE = 4096;
 
-/** Send raw PCM audio data to Pulse. Buffers to 4096-byte chunks. */
+/** Send raw PCM audio data to Deepgram. Buffers to 4096-byte chunks. */
 export function sendAudioChunk(pcm: Uint8Array): void {
   if (!pcm || pcm.length === 0) return;
 
@@ -247,16 +263,14 @@ export function sendAudioChunk(pcm: Uint8Array): void {
   newBuffer.set(pcm, chunkBuffer.length);
   chunkBuffer = newBuffer;
 
-  // Send complete 4096-byte chunks
-  while (chunkBuffer.length >= PULSE_CHUNK_SIZE) {
-    const chunk = chunkBuffer.slice(0, PULSE_CHUNK_SIZE);
-    chunkBuffer = chunkBuffer.slice(PULSE_CHUNK_SIZE);
+  // Send complete chunks
+  while (chunkBuffer.length >= CHUNK_SIZE) {
+    const chunk = chunkBuffer.slice(0, CHUNK_SIZE);
+    chunkBuffer = chunkBuffer.slice(CHUNK_SIZE);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      // .slice() creates a new buffer — safe to send (no shared ArrayBuffer issues)
       ws.send(chunk);
     } else if (ws && ws.readyState === WebSocket.CONNECTING) {
-      // Buffer while connecting
       pendingChunks.push(chunk);
     }
     // If not connected at all, drop the audio (will reconnect)
@@ -267,11 +281,10 @@ export function sendAudioChunk(pcm: Uint8Array): void {
 export function flushAudioBuffer(): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     if (chunkBuffer.length > 0) {
-      // Send whatever we have, even if < 4096
-      ws.send(chunkBuffer.slice(0));  // .slice creates a clean copy
+      ws.send(chunkBuffer.slice(0));
     }
-    // Signal end of audio so Pulse returns final transcription
-    ws.send(JSON.stringify({ type: 'finalize' }));
+    // Signal end of audio so Deepgram returns final transcription
+    ws.send(JSON.stringify({ type: 'CloseStream' }));
   }
   chunkBuffer = new Uint8Array(0);
 }

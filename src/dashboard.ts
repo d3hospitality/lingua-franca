@@ -159,7 +159,7 @@ export function initDashboard(): void {
     }
   });
 
-  // Pulse API key input
+  // Deepgram API key input
   const pulseKeyInput = document.getElementById('settings-pulse-key') as HTMLInputElement;
   const pulseKeySaveBtn = document.getElementById('settings-pulse-key-save');
   if (pulseKeySaveBtn && pulseKeyInput) {
@@ -167,7 +167,7 @@ export function initDashboard(): void {
       const key = pulseKeyInput.value.trim();
       setPulseKey(key);
       await saveSettings({ pulseKey: key });
-      log(key ? 'Pulse STT key saved' : 'Pulse STT key cleared');
+      log(key ? 'Deepgram STT key saved' : 'Deepgram STT key cleared');
     });
   }
 
@@ -186,16 +186,16 @@ export function initDashboard(): void {
   // Subscribe to glasses page state changes — mirror on webapp
   onGlassesPageChange(handleGlassesPageChange);
 
-  // ── Pulse STT pipeline: glasses mic → Pulse WebSocket → HUD ──
-  // Stream raw PCM chunks directly to Pulse for real-time transcription
+  // ── Deepgram STT pipeline: glasses mic → Deepgram WebSocket → HUD ──
+  // Stream raw PCM chunks directly to Deepgram for real-time transcription
   onGlassesAudio((pcm) => {
     if (!speakActive) return;
     sendAudioChunk(pcm);
   });
 
-  // When Pulse returns a transcription, update both phone HUD + glasses HUD
-  let pulseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastPulseText = '';
+  // When Deepgram returns a transcription, update both phone HUD + glasses HUD
+  let sttDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastSTTText = '';
 
   onPulseResult(async (result: PulseResult) => {
     if (!speakActive || !speakTargetLangCode) return;
@@ -211,12 +211,12 @@ export function initDashboard(): void {
 
     // Debounce AI response generation — wait for speech to settle (1.5s pause)
     // to avoid hammering GPT on every partial transcription
-    if (pulseDebounceTimer) clearTimeout(pulseDebounceTimer);
+    if (sttDebounceTimer) clearTimeout(sttDebounceTimer);
 
-    if (result.text !== lastPulseText && result.text.trim().length > 5) {
-      lastPulseText = result.text;
+    if (result.text !== lastSTTText && result.text.trim().length > 5) {
+      lastSTTText = result.text;
 
-      pulseDebounceTimer = setTimeout(async () => {
+      sttDebounceTimer = setTimeout(async () => {
         if (!speakActive || !speakTargetLangCode) return;
 
         log(`[STT] ${result.language}: "${result.text.slice(0, 40)}..."`);
@@ -578,7 +578,7 @@ function handleGlassesPageChange(state: GlassesPageState): void {
     }
   }
 
-  // If glasses entered speak/dialogue, sync phone speak tab + start Pulse STT
+  // If glasses entered speak/dialogue, sync phone speak tab + start Deepgram STT
   if (state.page === 'dialogue-hud' && state.lang && !speakActive) {
     speakActive = true;
     speakTargetLangCode = state.lang as LangCode;
@@ -594,16 +594,16 @@ function handleGlassesPageChange(state: GlassesPageState): void {
         ? `${baseUrl}sprites/language/lang-${state.lang}.png`
         : `${baseUrl}sprites/candidate_language.png`;
     }
-    // Open Pulse WebSocket so glasses-initiated speak actually streams audio
+    // Open Deepgram WebSocket so glasses-initiated speak actually streams audio
     if (hasPulseKey()) {
       startPulseStream();
-      log(`Pulse STT started (glasses-initiated speak → ${state.langLabel || state.lang})`);
+      log(`Deepgram STT started (glasses-initiated speak → ${state.langLabel || state.lang})`);
     } else {
-      log('Set your Smallest.ai API key in Settings for live STT', 'error');
+      log('Set your Deepgram API key in Settings for live STT', 'error');
     }
   }
 
-  // If glasses left dialogue, reset speak state + stop Pulse STT
+  // If glasses left dialogue, reset speak state + stop Deepgram STT
   if ((state.page === 'home' || state.page === 'speak-select') && speakActive) {
     speakActive = false;
     speakTargetLangCode = null;
@@ -703,11 +703,11 @@ async function handleSpeakStart(): Promise<void> {
   // Push to glasses: dialogue HUD
   await startDialogueHUD(speakTargetLangCode);
 
-  // Start Pulse STT stream (connects WebSocket for real-time transcription)
+  // Start Deepgram STT stream (connects WebSocket for real-time transcription)
   if (hasPulseKey()) {
     startPulseStream();
   } else {
-    log('Set your Smallest.ai API key in Settings for live STT', 'error');
+    log('Set your Deepgram API key in Settings for live STT', 'error');
   }
 
   log(`Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
@@ -717,7 +717,7 @@ async function handleSpeakStop(): Promise<void> {
   speakActive = false;
   speakTargetLangCode = null;
 
-  // Stop Pulse STT stream
+  // Stop Deepgram STT stream
   flushAudioBuffer();
   stopPulseStream();
 
