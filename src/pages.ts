@@ -1192,10 +1192,10 @@ export function buildDialogueHUDPage(opts: DialogueHUDOptions): RebuildPageConta
     containerName: "dlg-lang-name",
     content: detectedLang,
     isEventCapture: 0,
-    borderWidth: 0,
   });
 
   // #43 — Live TTS transcription + translation (top-right, below lang name)
+  // Keep it simple like Sophicon — no border/radius/padding (glasses OS renders cleaner)
   const ttsText = new TextContainerProperty({
     xPosition: DLG_TEXT_X,
     yPosition: DLG_PAD + DLG_LABEL_H,
@@ -1205,9 +1205,6 @@ export function buildDialogueHUDPage(opts: DialogueHUDOptions): RebuildPageConta
     containerName: "dlg-tts-text",
     content: translation,
     isEventCapture: 0,
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingLength: 4,
   });
 
   // ── Bottom zone: your responses ──

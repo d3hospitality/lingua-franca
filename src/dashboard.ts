@@ -21,7 +21,7 @@ import {
   getActiveLang, setActiveLang, getSettings, saveSettings,
   type SavedPhrase, type QuizStats,
 } from './sync';
-import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startSpeakSelect, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, simulateGlassesClick, type GlassesPageState } from './events';
+import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, simulateGlassesClick, type GlassesPageState } from './events';
 import { sendAudioChunk, onPulseResult, startPulseStream, stopPulseStream, flushAudioBuffer, setPulseKey, hasPulseKey, getPulseKey, type PulseResult } from './pulse-stt';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, getOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
@@ -198,39 +198,65 @@ export function initDashboard(): void {
   let lastSTTText = '';
 
   onPulseResult(async (result: PulseResult) => {
-    if (!speakActive || !speakTargetLangCode) return;
+    if (!speakActive) return;
 
+    const detectedLang = result.language !== 'unknown' ? result.language : undefined;
     const displayText = result.text;
+
+    // Auto-detect: update speakTargetLangCode from Deepgram detection
+    // Ignore if detected language matches "I speak" (that's the user, not the other party)
+    if (detectedLang && detectedLang !== currentSpeakLang && detectedLang !== speakTargetLangCode) {
+      speakTargetLangCode = detectedLang as LangCode;
+      // Update phone UI with detected language
+      const theirLangEl = document.getElementById('speak-their-lang');
+      const theirSprite = document.getElementById('speak-their-sprite') as HTMLImageElement;
+      if (theirLangEl) theirLangEl.textContent = LANG_LABEL[detectedLang] || detectedLang;
+      if (theirSprite) {
+        theirSprite.src = SPRITE_LANGS.has(detectedLang)
+          ? `${SPEAK_BASE_URL}sprites/language/lang-${detectedLang}.png`
+          : `${SPEAK_BASE_URL}sprites/candidate_language.png`;
+      }
+      log(`[STT] Detected: ${LANG_FLAG[detectedLang] || ''} ${LANG_LABEL[detectedLang] || detectedLang}`);
+    }
 
     // Update phone UI immediately with transcription
     const ttsEl = document.getElementById('speak-tts-text');
     if (ttsEl) ttsEl.textContent = displayText;
 
     // Update glasses HUD with live transcription
-    await updateDialogueHUD(displayText, ['Listening...'], result.language !== 'unknown' ? result.language : undefined);
+    await updateDialogueHUD(displayText, ['Listening...'], detectedLang);
 
     // Debounce AI response generation — wait for speech to settle (1.5s pause)
-    // to avoid hammering GPT on every partial transcription
     if (sttDebounceTimer) clearTimeout(sttDebounceTimer);
 
     if (result.text !== lastSTTText && result.text.trim().length > 5) {
       lastSTTText = result.text;
 
       sttDebounceTimer = setTimeout(async () => {
-        if (!speakActive || !speakTargetLangCode) return;
+        if (!speakActive) return;
 
         log(`[STT] ${result.language}: "${result.text.slice(0, 40)}..."`);
 
-        // Update glasses with "Thinking..." while GPT generates
-        await updateDialogueHUD(displayText, ['Thinking...'], result.language !== 'unknown' ? result.language : undefined);
+        // Use detected target language for AI responses (or fallback to activeLang)
+        const targetForAI = (speakTargetLangCode || activeLang) as LangCode;
 
-        // Generate AI response suggestions
+        // Check if OpenAI key is available for intelligent responses
+        const hasGPT = hasOpenAIKey();
+        if (!hasGPT) {
+          log('[GPT] No OpenAI key — using fallback responses. Set key in Settings.');
+        }
+
+        // Update glasses with "Thinking..." while GPT generates
+        await updateDialogueHUD(displayText, [hasGPT ? 'Thinking...' : 'Set OpenAI key for AI replies'], detectedLang);
+
+        // Generate AI response suggestions (uses GPT if key is set, fallback otherwise)
         const whisperCompat = {
           text: result.text,
           language: result.language,
           translation: undefined as string | undefined,
         };
-        const suggestions = await generateQuickResponses(whisperCompat, speakTargetLangCode!);
+        const suggestions = await generateQuickResponses(whisperCompat, targetForAI);
+        log(`[GPT] ${hasGPT ? 'AI' : 'Fallback'}: ${suggestions.length} suggestions`);
 
         // Update phone suggestions
         const sugEl = document.getElementById('speak-suggestions');
@@ -240,8 +266,8 @@ export function initDashboard(): void {
           ).join('');
         }
 
-        // Push final suggestions to glasses
-        await updateDialogueHUD(displayText, suggestions, result.language !== 'unknown' ? result.language : undefined);
+        // Push final suggestions to glasses — this triggers a full rebuild (new list items)
+        await updateDialogueHUD(displayText, suggestions, detectedLang);
       }, 1500);
     }
   });
@@ -578,33 +604,27 @@ function handleGlassesPageChange(state: GlassesPageState): void {
     }
   }
 
-  // If glasses entered speak/dialogue, sync phone speak tab + start Deepgram STT
-  if (state.page === 'dialogue-hud' && state.lang && !speakActive) {
+  // If glasses entered dialogue, sync phone speak tab + start Deepgram STT
+  if (state.page === 'dialogue-hud' && !speakActive) {
     speakActive = true;
-    speakTargetLangCode = state.lang as LangCode;
+    speakTargetLangCode = state.lang ? state.lang as LangCode : null;
     const selectCard = document.getElementById('speak-select-card');
     const hud = document.getElementById('speak-hud');
     if (selectCard) selectCard.style.display = 'none';
     if (hud) hud.style.display = '';
     const theirLangEl = document.getElementById('speak-their-lang');
-    const theirSprite = document.getElementById('speak-their-sprite') as HTMLImageElement;
-    if (theirLangEl) theirLangEl.textContent = state.langLabel || '';
-    if (theirSprite && state.lang) {
-      theirSprite.src = SPRITE_LANGS.has(state.lang)
-        ? `${baseUrl}sprites/language/lang-${state.lang}.png`
-        : `${baseUrl}sprites/candidate_language.png`;
-    }
+    if (theirLangEl) theirLangEl.textContent = state.langLabel || 'Detecting...';
     // Open Deepgram WebSocket so glasses-initiated speak actually streams audio
     if (hasPulseKey()) {
       startPulseStream();
-      log(`Deepgram STT started (glasses-initiated speak → ${state.langLabel || state.lang})`);
+      log('Deepgram STT started (auto-detect mode)');
     } else {
       log('Set your Deepgram API key in Settings for live STT', 'error');
     }
   }
 
   // If glasses left dialogue, reset speak state + stop Deepgram STT
-  if ((state.page === 'home' || state.page === 'speak-select') && speakActive) {
+  if (state.page === 'home' && speakActive) {
     speakActive = false;
     speakTargetLangCode = null;
     flushAudioBuffer();
@@ -658,11 +678,8 @@ function refreshSpeak(): void {
 }
 
 async function handleSpeakStart(): Promise<void> {
-  const langSelect = document.getElementById('speak-lang-select') as HTMLSelectElement;
-  if (!langSelect) return;
-
-  speakTargetLangCode = langSelect.value as LangCode;
   speakActive = true;
+  speakTargetLangCode = null;  // auto-detect from Deepgram
 
   // Update phone UI — show HUD, hide selector
   const selectCard = document.getElementById('speak-select-card');
@@ -670,15 +687,13 @@ async function handleSpeakStart(): Promise<void> {
   if (selectCard) selectCard.style.display = 'none';
   if (hud) hud.style.display = '';
 
-  // Set their language info
+  // Set their language info — will update dynamically when Deepgram detects
   const theirLangEl = document.getElementById('speak-their-lang');
   const theirSprite = document.getElementById('speak-their-sprite') as HTMLImageElement;
-  if (theirLangEl) theirLangEl.textContent = LANG_LABEL[speakTargetLangCode] || speakTargetLangCode;
+  if (theirLangEl) theirLangEl.textContent = 'Detecting...';
   if (theirSprite) {
-    theirSprite.src = SPRITE_LANGS.has(speakTargetLangCode)
-      ? `${SPEAK_BASE_URL}sprites/language/lang-${speakTargetLangCode}.png`
-      : `${SPEAK_BASE_URL}sprites/candidate_language.png`;
-    theirSprite.alt = LANG_LABEL[speakTargetLangCode] || '';
+    theirSprite.src = `${SPEAK_BASE_URL}sprites/candidate_language.png`;
+    theirSprite.alt = 'Auto-detect';
   }
 
   // Set your language info
@@ -698,19 +713,19 @@ async function handleSpeakStart(): Promise<void> {
 
   // Initial suggestions
   const sugEl = document.getElementById('speak-suggestions');
-  if (sugEl) sugEl.innerHTML = '<div class="speak-option muted">Waiting for speech...</div>';
+  if (sugEl) sugEl.innerHTML = '<div class="speak-option muted">Speak or let them speak...</div>';
 
-  // Push to glasses: dialogue HUD
-  await startDialogueHUD(speakTargetLangCode);
+  // Push to glasses: dialogue HUD with auto-detect
+  await startDialogueHUD();
 
-  // Start Deepgram STT stream (connects WebSocket for real-time transcription)
+  // Start Deepgram STT stream
   if (hasPulseKey()) {
     startPulseStream();
   } else {
     log('Set your Deepgram API key in Settings for live STT', 'error');
   }
 
-  log(`Speak: ${LANG_LABEL[speakTargetLangCode]} — conversation started`);
+  log('Speak: auto-detect mode — conversation started');
 }
 
 async function handleSpeakStop(): Promise<void> {

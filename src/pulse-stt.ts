@@ -27,7 +27,9 @@ type STTCallback = (result: PulseResult) => void;
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 
-let apiKey = '';
+// Default Deepgram API key — hardcoded so STT works immediately without settings load
+const DEFAULT_DEEPGRAM_KEY = '2241f7f8cb42af1ef7711a2c9fb0b7d783aad830';
+let apiKey = DEFAULT_DEEPGRAM_KEY;
 let ws: WebSocket | null = null;
 let connected = false;
 let listeners: STTCallback[] = [];
@@ -51,8 +53,8 @@ export function onPulseResult(cb: STTCallback): () => void {
 // ═══════════════════════════════════════════════════════════════════
 
 export function setPulseKey(key: string): void {
-  apiKey = key;
-  log(key ? 'Deepgram API key set' : 'Deepgram API key cleared');
+  apiKey = key || DEFAULT_DEEPGRAM_KEY;  // fall back to default if cleared
+  log(key ? 'Deepgram API key set' : 'Deepgram API key → default');
 }
 
 export function hasPulseKey(): boolean {
