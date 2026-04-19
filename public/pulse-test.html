@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smallest.ai STT Test</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #111; color: #eee; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .container { max-width: 540px; width: 100%; padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  p.sub { color: #888; font-size: 0.85rem; margin-bottom: 20px; }
+  .key-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .key-row input { flex: 1; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px 14px; color: #eee; font-size: 0.9rem; font-family: monospace; }
+  button { background: #2a2; color: #fff; border: none; padding: 14px 28px; border-radius: 10px; font-size: 1rem; cursor: pointer; width: 100%; transition: background 0.2s; }
+  button:hover { background: #3b3; }
+  button.stop { background: #c33; }
+  button.stop:hover { background: #d44; }
+  button:disabled { background: #444; cursor: not-allowed; }
+  #status { margin-top: 16px; font-size: 0.85rem; color: #888; }
+  #partial { margin-top: 8px; color: #aaf; font-style: italic; font-size: 0.9rem; min-height: 20px; }
+  #transcript { margin-top: 12px; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 16px; min-height: 120px; font-size: 1rem; line-height: 1.6; white-space: pre-wrap; }
+  #log { margin-top: 16px; background: #0a0a0a; border: 1px solid #222; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.72rem; color: #666; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .dot.green { background: #2a2; box-shadow: 0 0 6px #2a2; }
+  .dot.red { background: #c33; }
+  .dot.yellow { background: #ca2; }
+  .info { margin-top: 12px; padding: 10px 14px; background: #1a1a0a; border: 1px solid #333; border-radius: 8px; font-size: 0.78rem; color: #aa8; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Smallest.ai STT Test</h1>
+  <p class="sub">Browser mic → Vite proxy → Smallest.ai Pulse → live transcript</p>
+
+  <div class="key-row">
+    <input id="apiKey" type="password" placeholder="Smallest.ai API key (sk_...)" />
+  </div>
+
+  <button id="btn" onclick="toggle()">Start Listening</button>
+  <div id="status"><span class="dot red"></span> Not connected</div>
+  <div id="partial"></div>
+  <div id="transcript">Transcription will appear here...</div>
+  <div id="log"></div>
+  <div class="info">
+    This page must be served through <code>npm run dev</code> (Vite dev server).
+    The Vite server proxies WebSocket connections to Smallest.ai with the proper
+    Authorization header that browsers can't set directly.
+  </div>
+</div>
+<script>
+let ws = null;
+let audioCtx = null;
+let mediaStream = null;
+let processor = null;
+let running = false;
+let intentionallyStopped = false;
+let finalTranscript = '';
+
+const btn = document.getElementById('btn');
+const statusEl = document.getElementById('status');
+const transcriptEl = document.getElementById('transcript');
+const partialEl = document.getElementById('partial');
+const logEl = document.getElementById('log');
+const apiKeyInput = document.getElementById('apiKey');
+
+// Restore saved key
+apiKeyInput.value = localStorage.getItem('pulse_test_key') || '';
+
+function addLog(msg) {
+  const ts = new Date().toLocaleTimeString();
+  logEl.textContent += `[${ts}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(`[Pulse] ${msg}`);
+}
+
+function setStatus(color, text) {
+  statusEl.innerHTML = `<span class="dot ${color}"></span> ${text}`;
+}
+
+async function toggle() {
+  if (running) { stop(); } else { await start(); }
+}
+
+async function start() {
+  const key = apiKeyInput.value.trim();
+  if (!key) {
+    setStatus('red', 'Enter your API key first');
+    apiKeyInput.focus();
+    return;
+  }
+  localStorage.setItem('pulse_test_key', key);
+
+  btn.disabled = true;
+  intentionallyStopped = false;
+  logEl.textContent = '';
+  setStatus('yellow', 'Requesting microphone...');
+  addLog('Requesting mic access...');
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    });
+    addLog('Mic access granted');
+  } catch (e) {
+    setStatus('red', 'Mic access denied: ' + e.message);
+    addLog('ERROR: Mic denied — ' + e.message);
+    btn.disabled = false;
+    return;
+  }
+
+  setStatus('yellow', 'Connecting via proxy...');
+
+  // Build proxy URL — same host as this page, /pulse-proxy path
+  const params = new URLSearchParams({
+    language: 'en',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    token: key,
+  });
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${wsProto}://${location.host}/pulse-proxy?${params.toString()}`;
+  addLog('Proxy URL: ' + url.replace(/token=[^&]+/, 'token=sk_****'));
+
+  try {
+    ws = new WebSocket(url);
+  } catch (e) {
+    setStatus('red', 'WebSocket creation failed: ' + e.message);
+    addLog('ERROR: ' + e.message);
+    cleanup();
+    btn.disabled = false;
+    return;
+  }
+
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    addLog('WebSocket OPEN');
+    setStatus('green', 'Connected — speak now!');
+    finalTranscript = '';
+    transcriptEl.textContent = '';
+    partialEl.textContent = '';
+    startAudioCapture();
+    running = true;
+    btn.textContent = 'Stop Listening';
+    btn.classList.add('stop');
+    btn.disabled = false;
+  };
+
+  ws.onmessage = (event) => {
+    const raw = typeof event.data === 'string' ? event.data : `[binary ${event.data.byteLength}b]`;
+    addLog('MSG: ' + raw.slice(0, 200));
+
+    try {
+      const data = JSON.parse(event.data);
+      const text = data.transcript || data.full_transcript || data.transcription || data.text || '';
+
+      if (data.is_final) {
+        if (text.trim()) {
+          finalTranscript += (finalTranscript ? ' ' : '') + text.trim();
+          transcriptEl.textContent = finalTranscript;
+        }
+        partialEl.textContent = '';
+      } else {
+        if (text.trim()) {
+          partialEl.textContent = '... ' + text.trim();
+        }
+      }
+    } catch (e) {
+      addLog('Parse error: ' + e.message);
+    }
+  };
+
+  ws.onerror = () => {
+    addLog('ERROR: WebSocket error');
+    setStatus('red', 'WebSocket error — see log');
+  };
+
+  ws.onclose = (e) => {
+    addLog(`CLOSE: code=${e.code} reason="${e.reason}" wasClean=${e.wasClean}`);
+    if (running && !intentionallyStopped) {
+      setStatus('red', `Disconnected (${e.code}: ${e.reason || 'no reason'})`);
+      running = false;
+      btn.textContent = 'Start Listening';
+      btn.classList.remove('stop');
+      btn.disabled = false;
+      cleanup();
+    }
+  };
+}
+
+function startAudioCapture() {
+  audioCtx = new AudioContext();
+  const nativeSR = audioCtx.sampleRate;
+  addLog('AudioContext sampleRate: ' + nativeSR);
+
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+  const bufferSize = 4096;
+  processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+
+  let chunkCount = 0;
+  processor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const float32 = e.inputBuffer.getChannelData(0);
+
+    // Resample from native rate to 16kHz
+    const ratio = nativeSR / 16000;
+    const outLen = Math.floor(float32.length / ratio);
+    const int16 = new Int16Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcIdx = Math.floor(i * ratio);
+      const s = Math.max(-1, Math.min(1, float32[srcIdx]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+
+    ws.send(new Uint8Array(int16.buffer));
+    chunkCount++;
+    if (chunkCount % 20 === 0) {
+      addLog(`Sent ${chunkCount} chunks (${int16.byteLength}b each @ 16kHz)`);
+    }
+  };
+
+  source.connect(processor);
+  processor.connect(audioCtx.destination);
+  addLog('Audio capture started (resampling ' + nativeSR + ' → 16000 Hz)');
+}
+
+function cleanup() {
+  if (processor) { processor.disconnect(); processor = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+}
+
+function stop() {
+  intentionallyStopped = true;
+  running = false;
+  btn.textContent = 'Start Listening';
+  btn.classList.remove('stop');
+  btn.disabled = false;
+  addLog('User stopped');
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'finalize' }));
+    addLog('Sent finalize');
+  }
+  cleanup();
+  setTimeout(() => {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; addLog('WebSocket closed'); }
+  }, 800);
+  setStatus('red', 'Stopped');
+}
+</script>
+</body>
+</html>

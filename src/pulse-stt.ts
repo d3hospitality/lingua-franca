@@ -68,7 +68,38 @@ export function getPulseKey(): string {
 // come back as JSON text frames: {"transcription": "..."}
 // ═══════════════════════════════════════════════════════════════════
 
-const PULSE_BASE_URL = 'wss://api.smallest.ai/waves/v1/pulse/get_text';
+const PULSE_DIRECT_URL = 'wss://api.smallest.ai/waves/v1/pulse/get_text';
+
+/**
+ * Build the WebSocket URL for Pulse STT.
+ * In development (Vite dev server), route through /pulse-proxy which adds
+ * the Authorization header server-side. In production, use a deployed proxy
+ * (set VITE_PULSE_PROXY_URL env var) or fall back to direct (will 401).
+ */
+function buildPulseUrl(): string {
+  const params = new URLSearchParams({
+    encoding: 'linear16',
+    sample_rate: '16000',
+    language: 'multi',           // auto-detect from 30+ languages
+    token: apiKey,               // proxy reads this; stripped before upstream
+  });
+
+  // Dev server proxy — same host, /pulse-proxy path
+  if (location.protocol === 'http:' || location.hostname === 'localhost') {
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${wsProto}://${location.host}/pulse-proxy?${params.toString()}`;
+  }
+
+  // Production proxy (Cloudflare Worker, etc.)
+  const proxyUrl = (import.meta as any).env?.VITE_PULSE_PROXY_URL;
+  if (proxyUrl) {
+    return `${proxyUrl}?${params.toString()}`;
+  }
+
+  // Fallback: direct connection (will fail in browser due to missing Authorization header)
+  log('[Pulse] WARNING: No proxy configured — direct WS will likely 401', 'error');
+  return `${PULSE_DIRECT_URL}?${params.toString()}`;
+}
 
 export function startPulseStream(): void {
   if (!apiKey) {
@@ -85,17 +116,7 @@ export function startPulseStream(): void {
   chunkBuffer = new Uint8Array(0);
   pendingChunks = [];
 
-  const params = new URLSearchParams({
-    encoding: 'linear16',
-    sample_rate: '16000',
-    language: 'multi',           // auto-detect from 30+ languages
-  });
-
-  // Smallest.ai auth: Authorization Bearer header
-  // Browser WebSocket doesn't support custom headers natively,
-  // so we send the token as a first JSON message after connect.
-  // Also pass as query param as fallback.
-  const url = `${PULSE_BASE_URL}?${params.toString()}&token=${encodeURIComponent(apiKey)}`;
+  const url = buildPulseUrl();
   log('[Pulse] Connecting...');
 
   ws = new WebSocket(url);
@@ -104,11 +125,6 @@ export function startPulseStream(): void {
   ws.onopen = () => {
     connected = true;
     log('[Pulse] Connected — streaming', 'success');
-
-    // Send auth token as first message (browser can't set Authorization header)
-    if (ws) {
-      ws.send(JSON.stringify({ token: apiKey }));
-    }
 
     // Flush any chunks that arrived while connecting
     for (const chunk of pendingChunks) {

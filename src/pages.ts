@@ -407,29 +407,37 @@ export function buildScenarioGroupPage(lang: LangCode, speakLangCode?: string): 
 //   5 = info text ("Social & Greetings · 4 phrases")
 // ══════════════════════════════════════════════════════════════════
 
+/** Convert a snake_case key to Title Case (e.g. "ask_drinks" → "Ask Drinks") */
+export function formatKey(key: string): string {
+  return key
+    .replace(/[\[\]]/g, '')            // strip brackets: "[GREETING]" → "GREETING"
+    .replace(/_/g, ' ')                // underscores to spaces
+    .replace(/\b\w/g, c => c.toUpperCase()); // capitalize first letter of each word
+}
+
 /** Get a short English label for a phrase key */
 export function phraseLabel(key: PhraseKey): string {
   const labels: Record<PhraseKey, string> = {
-    flirty_hello: "Flirty hello",
-    warm_hello: "Warm hello",
-    ask_drinks: "Ask about drinks",
-    like_most: "What I like most",
-    smile_compliment: "Smile compliment",
-    try_food: "Try the food here",
-    after_dinner: "After dinner",
-    polite_help: "Ask for help",
+    flirty_hello: "Flirty Hello",
+    warm_hello: "Warm Hello",
+    ask_drinks: "Ask About Drinks",
+    like_most: "What I Like Most",
+    smile_compliment: "Smile Compliment",
+    try_food: "Try the Food Here",
+    after_dinner: "After Dinner",
+    polite_help: "Ask for Help",
     where_place: "Where is...?",
-    order_drink: "Order a drink",
-    city_is: "This city is...",
-    formal_thanks: "Formal thanks",
-    offer_drink: "Offer a drink",
-    continue_over: "Continue over food",
-    good_to_see: "Good to see you",
-    food_is: "This food is...",
-    nice_to_meet: "Nice to meet you",
-    prefer_or: "Do you prefer...?",
+    order_drink: "Order a Drink",
+    city_is: "This City is...",
+    formal_thanks: "Formal Thanks",
+    offer_drink: "Offer a Drink",
+    continue_over: "Continue Over Food",
+    good_to_see: "Good to See You",
+    food_is: "This Food is...",
+    nice_to_meet: "Nice to Meet You",
+    prefer_or: "Do You Prefer...?",
   };
-  return labels[key] || key;
+  return labels[key] || formatKey(key);
 }
 
 export function buildPhraseListPage(lang: LangCode, groupIdx: number, speakLangCode?: string): RebuildPageContainer {
@@ -504,7 +512,7 @@ export function pickSlotsForTemplate(template: string, lang: LangCode): VocabIte
 /** Fill a phrase template with pre-picked vocab (native side) */
 export function fillSlots(template: string, lang: LangCode, prePicked?: VocabItem[]): string {
   const vocab = VOCAB[lang];
-  if (!vocab) return template;
+  if (!vocab) return cleanUnfilledSlots(template);
 
   if (prePicked && prePicked.length > 0) {
     let result = template;
@@ -533,7 +541,7 @@ export function fillSlots(template: string, lang: LangCode, prePicked?: VocabIte
 /** Fill a romanization template with pre-picked vocab (uses .rom, falls back to .tr) */
 export function fillSlotsRom(template: string, lang: LangCode, prePicked?: VocabItem[]): string {
   const vocab = VOCAB[lang];
-  if (!vocab) return template;
+  if (!vocab) return cleanUnfilledSlots(template);
 
   if (prePicked && prePicked.length > 0) {
     let result = template;
@@ -566,7 +574,7 @@ export function fillSlotsRom(template: string, lang: LangCode, prePicked?: Vocab
 /** Fill a phonetic template with pre-picked vocab (uses .phon, falls back to .rom, then .tr) */
 export function fillSlotsPhon(template: string, lang: LangCode, prePicked?: VocabItem[]): string {
   const vocab = VOCAB[lang];
-  if (!vocab) return template;
+  if (!vocab) return cleanUnfilledSlots(template);
 
   if (prePicked && prePicked.length > 0) {
     let result = template;
@@ -662,10 +670,17 @@ export const EN_TEMPLATES: Record<PhraseKey, string> = {
   prefer_or: "Do you prefer [DRINKS] or [DRINKS]?",
 };
 
+/** Strip any remaining [SLOT] markers from a string, lowercasing the word */
+function cleanUnfilledSlots(text: string): string {
+  return text.replace(/\[([A-Z_]+)\]/g, (_, slot: string) =>
+    slot.toLowerCase().replace(/_/g, ' ')
+  );
+}
+
 /** Fill an English phrase template with pre-picked or random vocab */
 export function fillSlotsEnglish(key: PhraseKey, lang: LangCode, prePicked?: VocabItem[]): string {
   const vocab = VOCAB[lang];
-  if (!vocab) return key;
+  if (!vocab) return cleanUnfilledSlots(EN_TEMPLATES[key] || formatKey(key));
 
   let result = EN_TEMPLATES[key] || key;
 

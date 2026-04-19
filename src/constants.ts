@@ -265,7 +265,7 @@ export const TR_PHON: Record<string, Record<PhraseKey, string>> = {
 // ── Helper: get phrase in target language ──
 
 export function langPhrase(lang: string, key: PhraseKey): string {
-  return TR[lang]?.[key] ?? "[GREETING]";
+  return TR[lang]?.[key] ?? "";
 }
 
 export function langRom(lang: string, key: PhraseKey): string {

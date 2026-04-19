@@ -12,7 +12,7 @@ import {
   type LangCode, type PhraseKey, type VocabCategory, type VocabItem,
 } from './constants';
 import {
-  SCENARIO_GROUPS, fillSlots, fillSlotsRom, fillSlotsPhon, fillSlotsEnglish,
+  SCENARIO_GROUPS, phraseLabel, fillSlots, fillSlotsRom, fillSlotsPhon, fillSlotsEnglish,
 } from './pages';
 import {
   getSavedPhrases, savePhrase, deletePhrase,
@@ -838,39 +838,53 @@ export async function updateSpeakHUD(translation: string, suggestions: string[])
   await updateDialogueHUD(translation, suggestions);
 }
 
+/** Scene icon map for scenario groups */
+const GROUP_ICONS: Record<number, string> = {
+  0: '🗣', 1: '🍷', 2: '✨', 3: '🗺', 4: '🤝',
+};
+
 function renderQuickScenarios(): void {
   const container = document.getElementById('home-quick-scenarios');
   if (!container) return;
 
   // Show 4 random scenarios from different groups
   const shuffled = [...SCENARIO_GROUPS].sort(() => Math.random() - 0.5);
-  const picks: { group: string; key: PhraseKey; en: string; native: string; rom: string; phon: string }[] = [];
-  for (const g of shuffled) {
-    if (picks.length >= 4) break;
+  const picks: { groupIdx: number; group: string; key: PhraseKey; label: string; en: string; native: string; rom: string; phon: string }[] = [];
+  for (let i = 0; i < shuffled.length && picks.length < 4; i++) {
+    const g = shuffled[i];
+    const groupIdx = SCENARIO_GROUPS.indexOf(g);
     const key = g.keys[Math.floor(Math.random() * g.keys.length)];
     const nativeTemplate = langPhrase(activeLang, key);
     const romTemplate = langRom(activeLang, key);
     const phonTemplate = langPhon(activeLang, key);
     picks.push({
+      groupIdx,
       group: g.label,
       key,
+      label: phraseLabel(key),
       en: fillSlotsEnglish(key, activeLang),
-      native: fillSlots(nativeTemplate, activeLang),
+      native: nativeTemplate ? fillSlots(nativeTemplate, activeLang) : '',
       rom: needsRom(activeLang) ? fillSlotsRom(romTemplate, activeLang) : "",
       phon: phonTemplate ? fillSlotsPhon(phonTemplate, activeLang) : "",
     });
   }
 
   container.innerHTML = picks.map(p => `
-    <div class="phrase-item" data-action="quick-scenario" data-key="${p.key}">
-      <div>
-        <div class="phrase-en">${escHtml(p.en)}</div>
-        <div class="phrase-tr" style="font-size:0.75rem">${escHtml(p.native)}</div>
-        ${p.rom ? `<div class="phrase-rom" style="font-size:0.65rem">${escHtml(p.rom)}</div>` : ''}
-        ${p.phon ? `<div style="font-size:0.6rem;color:var(--gold);opacity:0.85">🔊 ${escHtml(p.phon)}</div>` : ''}
-        <div class="phrase-rom" style="font-size:0.6rem;opacity:0.6">${escHtml(p.group)}</div>
+    <div class="scenario-card" data-action="quick-scenario" data-key="${p.key}">
+      <div class="scenario-card-header">
+        <span class="scenario-icon">${GROUP_ICONS[p.groupIdx] || '💬'}</span>
+        <span class="scenario-label">${escHtml(p.label)}</span>
+        <span class="scenario-group">${escHtml(p.group)}</span>
       </div>
-      <button class="btn-outline-sm" data-action="push-quick" data-key="${p.key}">G2</button>
+      <div class="scenario-card-body">
+        <div class="scenario-en">${escHtml(p.en)}</div>
+        ${p.native ? `<div class="scenario-tr">${escHtml(p.native)}</div>` : ''}
+        ${p.rom ? `<div class="scenario-rom">${escHtml(p.rom)}</div>` : ''}
+        ${p.phon ? `<div class="scenario-phon">${escHtml(p.phon)}</div>` : ''}
+      </div>
+      <button class="scenario-push-btn" data-action="push-quick" data-key="${p.key}">
+        <span style="font-size:0.7rem">Send to</span> G2
+      </button>
     </div>
   `).join('');
 }

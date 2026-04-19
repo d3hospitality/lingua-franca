@@ -16,7 +16,7 @@ import {
   type LangCode, type VocabItem,
 } from './constants';
 import {
-  EN_TEMPLATES, fillSlotsEnglish, fillSlotsEnglishHighlighted,
+  EN_TEMPLATES, phraseLabel, fillSlotsEnglish, fillSlotsEnglishHighlighted,
   fillSlots, fillSlotsRom, fillSlotsHighlighted,
   fillSlotsForSpeaker, fillSlotsForSpeakerHighlighted,
   getSpeakerSlotLabel, pickSlotsForTemplate, getSlotCategories,
@@ -62,7 +62,7 @@ export function initCustomPhraseBuilder(lang: LangCode): void {
     keys.forEach(key => {
       const opt = document.createElement('option');
       opt.value = key;
-      opt.textContent = EN_TEMPLATES[key];
+      opt.textContent = phraseLabel(key);
       templateSelect.appendChild(opt);
     });
     templateSelect.addEventListener('change', () => {
