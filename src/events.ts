@@ -44,6 +44,7 @@ let currentPage: Page = "home";
 let currentLang: LangCode | null = null;
 let speakLang: string = "en";  // user's native / "I speak" language
 let speakTargetLang: LangCode | null = null;  // language of the person you're speaking with
+let languageLocked = false;  // true when user explicitly picked a language from speak-select
 let currentGroupIdx: number = -1;
 let currentPhraseIdx: number = -1;
 // Detail state: filled texts for the currently displayed phrase
@@ -264,10 +265,25 @@ async function goBack(bridge: EvenAppBridge, baseUrl: string): Promise<void> {
       }
       speakTargetLang = null;
       lastDetectedLang = null;
+      languageLocked = false;
       dialogueLayoutReady = false;
       lastSuggestions = [];
+      // Go back to speak-select so user can pick a different language
+      langHighlightIdx = 0;
+      await bridge.rebuildPageContainer(buildSpeakSelectPage(0));
+      const speakBackCode = LANG_CODES[0];
+      pushLangFlagSprite(
+        bridge, speakBackCode,
+        3, "speak-sprite",
+        LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+      ).catch(() => {});
+      currentPage = "speak-select";
+      log("< Back to language select", "success");
+    }
+    else if (currentPage === "speak-select") {
+      languageLocked = false;
       await goHome(bridge, baseUrl);
-      log("< Back to Home (speak ended)", "success");
+      log("< Back to Home", "success");
     }
     else if (currentPage === "languages" || currentPage === "library" || currentPage === "mother-tongue") {
       await goHome(bridge, baseUrl);
@@ -347,9 +363,17 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
     // ── HOME: main menu (Speak / Languages / Library / Quiz / Settings) ──
     if (currentPage === "home") {
       if (idx === 0) {
-        // Speak — go straight to dialogue HUD, Deepgram auto-detects language
-        await startDialogueHUD();
-        log("> Speak: auto-detect mode", "success");
+        // Speak — go to language selection page first
+        langHighlightIdx = 0;
+        await bridge.rebuildPageContainer(buildSpeakSelectPage(0));
+        const speakInitCode = LANG_CODES[0];
+        pushLangFlagSprite(
+          bridge, speakInitCode,
+          3, "speak-sprite",
+          LANG_PAGE_SPRITE.width, LANG_PAGE_SPRITE.height, baseUrl,
+        ).catch(() => {});
+        currentPage = "speak-select";
+        log("> Speak: select language", "success");
       } else if (idx === 1) {
         // Languages — phrase browsing with dynamic flag sprite
         langHighlightIdx = 0;
@@ -394,6 +418,26 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
         currentPage = "mother-tongue";
         lastNavigationTime = Date.now();
         log("> Settings: Mother Tongue", "success");
+      }
+      return;
+    }
+
+    // ── SPEAK-SELECT: pick a language → start dialogue HUD ──
+    if (currentPage === "speak-select") {
+      const backIdx = LANG_CODES.length;  // last item is "Back"
+      if (idx === backIdx) {
+        // Back → home
+        await bridge.rebuildPageContainer(rebuildHomePage());
+        pushHomeSprite(bridge, `${baseUrl}sprites/candidate_master.png`).catch(() => {});
+        currentPage = "home";
+        log("> Home", "success");
+      } else if (idx >= 0 && idx < LANG_CODES.length) {
+        // Language selected → lock and start dialogue HUD
+        const lockedLang = LANG_CODES[idx];
+        speakTargetLang = lockedLang;
+        languageLocked = true;
+        await startDialogueHUD();
+        log(`> Dialogue HUD — locked to ${LANG_LABEL[lockedLang]}`, "success");
       }
       return;
     }
@@ -885,25 +929,31 @@ export async function pushPhraseToGlasses(
 
 // ═══ SPEAK MODE — auto-detect live conversation ═══
 
-/** Start Dialogue HUD: open mic immediately, Deepgram auto-detects language */
+/** Start Dialogue HUD: open mic immediately, Deepgram auto-detects language.
+ *  If languageLocked is true, speakTargetLang is already set from speak-select. */
 export async function startDialogueHUD(): Promise<void> {
   if (!bridgeRef) { log("[SPEAK] No bridge", "error"); return; }
-  speakTargetLang = null;
-  lastDetectedLang = null;
+  // Only reset target lang if user didn't explicitly pick one from speak-select
+  if (!languageLocked) {
+    speakTargetLang = null;
+  }
+  lastDetectedLang = languageLocked ? (speakTargetLang || null) : null;
   dialogueLayoutReady = false;
   lastSuggestions = [];
 
-  // Direct rebuild — start with "Detecting..." until Deepgram identifies the language
+  // If language was locked from speak-select, show it immediately
+  const initLang = languageLocked && speakTargetLang
+    ? `${LANG_FLAG[speakTargetLang] || ''} ${LANG_LABEL[speakTargetLang] || speakTargetLang}`
+    : "🌍 Detecting...";
+
   const page = buildDialogueHUDPage({
-    detectedLang: "🌍 Detecting...",
+    detectedLang: initLang,
     translation: "Listening...",
     suggestions: ["Speak or let them speak..."],
   });
   await bridgeRef.rebuildPageContainer(page);
 
-  // Push "I speak" flag to #44 (your speech) — non-blocking
-  // #41 (their flag) will update dynamically when Deepgram detects the language
-  pushDialogueSprites(bridgeRef, baseUrlRef, undefined, speakLang).catch(() => {});
+  // No flag sprites — containers #41/#44 removed for cleaner layout
 
   currentPage = "dialogue-hud";
   lastNavigationTime = Date.now();
@@ -952,14 +1002,13 @@ export async function updateDialogueHUD(
 ): Promise<void> {
   if (!bridgeRef) return;
 
-  // Update detected language — Deepgram auto-detects, no pre-selection needed
-  if (detectedLangCode && detectedLangCode !== 'unknown' && detectedLangCode !== lastDetectedLang) {
+  // Update detected language — skip if user locked a specific language from speak-select
+  if (!languageLocked && detectedLangCode && detectedLangCode !== 'unknown' && detectedLangCode !== lastDetectedLang) {
     lastDetectedLang = detectedLangCode;
     speakTargetLang = detectedLangCode as LangCode;
     log(`[HUD] Detected → ${LANG_FLAG[detectedLangCode] || ''} ${LANG_LABEL[detectedLangCode] || detectedLangCode}`, "success");
 
-    // Push their language flag sprite now that we know what language they speak
-    pushDialogueSprites(bridgeRef, baseUrlRef, speakTargetLang, speakLang).catch(() => {});
+    // No flag sprites — containers #41/#44 removed for cleaner layout
   }
 
   const effectiveLang = speakTargetLang || detectedLangCode || '';
@@ -972,7 +1021,7 @@ export async function updateDialogueHUD(
     suggestions.some((s, i) => s !== lastSuggestions[i]);
 
   if (suggestionsChanged || !dialogueLayoutReady) {
-    // Full rebuild needed — suggestions list changed or first render
+    // Full rebuild needed — suggestions changed or first render
     const page = buildDialogueHUDPage({
       detectedLang: `${langFlag} ${langLabel}`,
       translation,
@@ -984,14 +1033,13 @@ export async function updateDialogueHUD(
     lastTextUpgradeMs = Date.now();
     log(`[HUD] Rebuild: "${translation.slice(0, 35)}..." + ${suggestions.length} suggestions`);
   } else {
-    // Fast path: text-only update (like Sophicon — no full rebuild)
-    // Rate limit to prevent flooding the glasses
+    // Fast path: text-only updates (no full rebuild needed)
     const now = Date.now();
     if (now - lastTextUpgradeMs < TEXT_UPGRADE_MIN_MS) return;
     lastTextUpgradeMs = now;
 
-    // Update container #43 (tts transcription text) in-place
-    const truncated = translation.slice(0, 2000); // SDK max
+    // Update #43 (tts transcription text) in-place
+    const truncated = translation.slice(0, 2000);
     try {
       await bridgeRef.textContainerUpgrade(new TextContainerUpgrade({
         containerID: 43,
@@ -1001,7 +1049,6 @@ export async function updateDialogueHUD(
         content: truncated,
       }));
     } catch (e) {
-      // textContainerUpgrade failed — fall back to full rebuild
       log(`[HUD] Text upgrade failed, rebuilding: ${e}`);
       const page = buildDialogueHUDPage({
         detectedLang: `${langFlag} ${langLabel}`,
@@ -1011,7 +1058,7 @@ export async function updateDialogueHUD(
       await bridgeRef.rebuildPageContainer(page);
     }
 
-    // Also update container #42 (language label) if it changed
+    // Update #42 (language label)
     const newLangContent = `${langFlag} ${langLabel}`;
     try {
       await bridgeRef.textContainerUpgrade(new TextContainerUpgrade({
@@ -1021,7 +1068,7 @@ export async function updateDialogueHUD(
         contentLength: newLangContent.length,
         content: newLangContent,
       }));
-    } catch { /* ignore — lang label rarely changes */ }
+    } catch { /* lang label rarely changes */ }
 
     log(`[HUD] Text: "${translation.slice(0, 35)}..."`);
   }
@@ -1042,6 +1089,7 @@ export async function endSpeakMode(): Promise<void> {
 
   speakTargetLang = null;
   lastDetectedLang = null;
+  languageLocked = false;
   dialogueLayoutReady = false;
   lastSuggestions = [];
   await goHome(bridgeRef, baseUrlRef);

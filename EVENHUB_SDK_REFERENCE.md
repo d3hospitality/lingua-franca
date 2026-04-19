@@ -529,3 +529,189 @@ The simulator is faster at processing images and doesn't enforce all hardware si
 - List scrolling feel differs significantly
 - Status events (battery, wearing) are unsupported in simulator
 - Audio routing requires explicit `--aid` flag on macOS
+
+---
+
+## 10. Vercel Proxy — Why It Exists & How We Built It
+
+### The Problem
+
+The Even Hub WebView **cannot make direct API calls to external services**. Calls to Deepgram, OpenAI, etc. fail silently — no CORS errors, no network logs, just nothing. This is a hard limitation of how Even Hub sandboxes the WebView. Only `fetch()` POST requests to your own backend work reliably.
+
+### The Solution: `lingua-franca-api`
+
+A lightweight Vercel serverless proxy that sits between the glasses WebView and the AI services. Two endpoints, zero infrastructure to maintain.
+
+```
+G2 Glasses (4-mic array)
+    ↓ PCM audio (16kHz, 16-bit LE, mono)
+Phone WebView (Even Hub SDK)
+    ↓ batch 2.5s chunks → base64 encode → POST
+Vercel Proxy (/api/transcribe)
+    ↓ wrap in WAV → forward to Deepgram nova-2 (primary) or OpenAI gpt-4o-transcribe (fallback)
+    ↓ return { text, confidence, language, engine }
+Phone WebView
+    ↓ accumulate transcript → POST
+Vercel Proxy (/api/suggest)
+    ↓ forward to GPT-4o-mini with conversation context + target language
+    ↓ return { suggestions: ["phrase\n(translation)", ...] }
+Phone WebView → Glasses Display
+```
+
+### Directory Structure
+
+```
+lingua-franca-api/
+  api/
+    transcribe.js    # STT proxy (Deepgram + OpenAI fallback)
+    suggest.js       # AI conversation suggestions (GPT-4o-mini)
+```
+
+That's it. No `package.json`, no framework, no build step. Vercel auto-detects the `api/` folder and deploys each file as a serverless function.
+
+### `/api/transcribe` — Speech-to-Text Proxy
+
+**Request:**
+```json
+POST /api/transcribe
+{
+  "audio": "<base64-encoded PCM>",
+  "language": "es"            // optional — forces single-language STT
+}
+```
+
+**What it does:**
+1. Decodes base64 PCM back to raw bytes
+2. Wraps in a proper WAV header (44 bytes: RIFF, sample rate 16000, 16-bit, mono)
+3. Tries **Deepgram nova-2** first (faster, native language detection, confidence scores)
+4. Falls back to **OpenAI gpt-4o-transcribe** if Deepgram fails
+5. Returns the transcription with metadata
+
+**Response:**
+```json
+{
+  "text": "Hola, como estas",
+  "confidence": 0.94,
+  "language": "es",
+  "engine": "deepgram"
+}
+```
+
+**WAV header construction** — the proxy builds a valid 44-byte WAV header in-memory. This is necessary because Deepgram and OpenAI expect audio files, not raw PCM. The header encodes: sample rate (16000), bits per sample (16), channels (1), and the PCM data length.
+
+**Language lock** — when `language` is set, the proxy passes it to Deepgram's `language` parameter (forces single-language transcription) or OpenAI's `language` field. When omitted, Deepgram runs `detect_language: true` for auto-detection. Note: in the current architecture, we DON'T lock the STT language from the client — we let Deepgram auto-detect so both sides of a bilingual conversation are transcribed correctly. The language selection only drives the UI and suggestion direction.
+
+### `/api/suggest` — AI Conversation Coach
+
+**Request:**
+```json
+POST /api/suggest
+{
+  "conversation": "Them: Hola, de donde eres?\nMe: I'm from Seattle.",
+  "targetLang": "Spanish",
+  "speakLang": "English"
+}
+```
+
+**What it does:**
+1. Sends the conversation transcript + language context to GPT-4o-mini
+2. System prompt instructs GPT to act as a live conversation coach — not a phrasebook
+3. Returns 3 suggestions, each with the target language phrase and a translation
+
+**Response:**
+```json
+{
+  "suggestions": [
+    "Me encanta la lluvia de Seattle\n(I love Seattle's rain)",
+    "¿Y tú, eres de aquí?\n(And you, are you from here?)",
+    "¿Qué me recomiendas hacer por aquí?\n(What do you recommend doing around here?)"
+  ]
+}
+```
+
+**Prompt design** — the system prompt tells GPT to think like a wingman. Each set of 3 suggestions has a different energy: one safe/polite, one that deepens the conversation, one bold wildcard. It references specific details from the conversation, never falls back to generic small talk, and adapts to the vibe (flirty, professional, deep, casual). Temperature is set to 0.85 for variety.
+
+**Suggestion format** — each suggestion is two lines separated by `\n`: target language phrase on top, `(translation)` on the second line. The parser on the client groups these pairs by checking if the next line starts with `(`.
+
+### How We Deploy
+
+```bash
+cd lingua-franca-api
+npx vercel --prod
+```
+
+First deploy prompts you to link to a Vercel project. After that, one command redeploys.
+
+**Environment variables** (set in Vercel dashboard → Settings → Environment Variables):
+- `DEEPGRAM_API_KEY` — Deepgram nova-2 API key (primary STT)
+- `OPENAI_API_KEY` — OpenAI API key (STT fallback + suggestion generation)
+
+**URLs:**
+- Primary: `https://lingua-franca-api.vercel.app/api/transcribe`
+- Primary: `https://lingua-franca-api.vercel.app/api/suggest`
+- Fallback STT: `https://sophicon-api.vercel.app/api/transcribe` (legacy Sophicon proxy, no language lock)
+
+### Client-Side Integration (pulse-stt.ts)
+
+The client batches audio and sends to the proxy:
+
+```typescript
+// Audio pipeline: glasses mic → chunks → batch → base64 → POST
+const BATCH_INTERVAL_MS = 2500;    // collect 2.5s of audio
+const MIN_AUDIO_BYTES = 8000;      // ~0.25s minimum to avoid empty requests
+
+// Every 2.5s, combine buffered PCM chunks:
+const combined = new Uint8Array(totalLen);
+let offset = 0;
+for (const chunk of chunks) {
+  combined.set(chunk, offset);
+  offset += chunk.length;
+}
+
+// Base64 encode (manual — btoa only takes strings):
+let binary = '';
+for (let i = 0; i < combined.length; i++) {
+  binary += String.fromCharCode(combined[i]);
+}
+const base64 = btoa(binary);
+
+// POST to proxy:
+const payload = { audio: base64 };
+// language field intentionally omitted — auto-detect both sides
+const resp = await fetch(TRANSCRIBE_URL, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payload),
+});
+```
+
+**Ghost filtering** — the client rejects low-quality transcriptions before displaying them:
+- Confidence below 0.4 → rejected (Deepgram noise)
+- Single word under 4 characters → rejected (gibberish)
+- Empty text → rejected
+
+### Client-Side Integration (dashboard.ts)
+
+Suggestions are triggered by conversation activity:
+
+```typescript
+// STT debounce: wait 8s after speech before generating suggestions
+// This gives GPT more conversation context to work with
+sttDebounceTimer = setTimeout(async () => {
+  await generateAndPushSuggestions(transcript, language);
+}, 8000);
+
+// Cooldown: hold suggestions stable for 10s before allowing refresh
+const SUGGESTION_COOLDOWN_MS = 10000;
+
+// Rolling refresh: regenerate every 20s during active conversation
+const ROLLING_SUGGESTION_MS = 20000;
+```
+
+### Why This Pattern Works for Even Hub
+
+1. **WebView sandbox** — the only reliable outbound network call from Even Hub is `fetch()` POST to a known URL. The proxy gives us that stable endpoint.
+2. **No API keys on client** — Deepgram/OpenAI keys live in Vercel env vars, never shipped to the phone.
+3. **WAV wrapping on server** — the glasses send raw PCM. The proxy adds the WAV header server-side, keeping the client payload small (just base64 PCM, no header overhead).
+4. **Fallback chain** — Deepgram is fast but sometimes drops. OpenAI is slower but more reliable. The proxy tries both automatically.
+5. **Zero infrastructure** — no Docker, no EC2, no databases. Just two .js files in an `api/` folder deployed to Vercel's edge network.

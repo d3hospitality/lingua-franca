@@ -1,15 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════
 // Lingua Franca — Batch STT (HTTP POST, proven in Even Hub webview)
 //
-// The Even Hub glasses webview CANNOT maintain WebSocket connections
-// to external servers (wss://api.deepgram.com fails silently).
-// Sophicon proved that HTTP fetch() POST works reliably.
+// The Even Hub glasses webview CANNOT make direct API calls to
+// external services (Deepgram, OpenAI, etc.) — they fail silently.
+// Only fetch() POST to our own Vercel proxy works reliably.
 //
-// Strategy: collect audio chunks for ~2 seconds, batch them,
-// POST to transcription proxy (same pattern as Sophicon ER-G2).
+// Strategy: collect audio chunks for ~2.5s, batch them,
+// POST base64 + language to Lingua Franca's Vercel proxy.
+// The proxy wraps in WAV, forwards to Deepgram nova-2 (primary)
+// or OpenAI gpt-4o-transcribe (fallback) with the language
+// parameter for single-language lock.
 //
 // Audio format: linear16 (signed 16-bit LE), 16kHz, mono
-// Proxy: Sophicon's Vercel proxy → OpenAI gpt-4o-transcribe
 // ═══════════════════════════════════════════════════════════════════
 
 import { log } from './ui';
@@ -20,7 +22,7 @@ import { log } from './ui';
 
 export interface PulseResult {
   text: string;           // transcription in the spoken language
-  language: string;       // detected language code (or 'unknown')
+  language: string;       // locked language code or 'unknown'
   isFinal: boolean;       // batch mode = always true
 }
 
@@ -30,27 +32,33 @@ type STTCallback = (result: PulseResult) => void;
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 
-// Transcription proxy — Sophicon's Vercel endpoint (proven to work)
-const TRANSCRIBE_URL = 'https://sophicon-api.vercel.app/api/transcribe';
+// Lingua Franca's own Vercel proxy — supports language lock
+const TRANSCRIBE_URL = 'https://lingua-franca-api.vercel.app/api/transcribe';
+// Fallback: Sophicon proxy (no language lock on deployed version)
+const TRANSCRIBE_FALLBACK = 'https://sophicon-api.vercel.app/api/transcribe';
 
-// Deepgram API key (kept for future use if WebSocket proxy is added)
+// API keys (kept for settings UI compatibility)
 const DEFAULT_DEEPGRAM_KEY = '2241f7f8cb42af1ef7711a2c9fb0b7d783aad830';
-let apiKey = DEFAULT_DEEPGRAM_KEY;
+let deepgramKey = DEFAULT_DEEPGRAM_KEY;
+let openaiKey: string | null = null;
 
 let listeners: STTCallback[] = [];
 let streaming = false;
 
+// Language lock — when set, proxy forces Deepgram to only transcribe this language
+let lockedLanguage: string | null = null;
+
 // Audio batch state
 let audioChunks: Uint8Array[] = [];
 let batchTimer: ReturnType<typeof setInterval> | null = null;
-let transcribing = false;  // prevent overlapping transcription requests
-const BATCH_INTERVAL_MS = 2500;  // send audio every 2.5 seconds
-const MIN_AUDIO_BYTES = 8000;    // don't transcribe < 0.25s of audio (16kHz × 2 bytes × 0.25s)
+let transcribing = false;
+const BATCH_INTERVAL_MS = 2500;
+const MIN_AUDIO_BYTES = 16000;   // ~0.5s at 16kHz×16bit×mono — reject tiny bursts from AC/noise
 
 // Rolling transcript
 let fullTranscript = '';
 let lastTranscriptTime = 0;
-const TRANSCRIPT_RESET_MS = 5000;  // reset after 5s silence
+const TRANSCRIPT_RESET_MS = 5000;
 
 /** Subscribe to STT results */
 export function onPulseResult(cb: STTCallback): () => void {
@@ -59,24 +67,45 @@ export function onPulseResult(cb: STTCallback): () => void {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// API KEY (kept for settings UI compatibility)
+// API KEYS
 // ═══════════════════════════════════════════════════════════════════
 
 export function setPulseKey(key: string): void {
-  apiKey = key || DEFAULT_DEEPGRAM_KEY;
-  log(key ? 'STT API key set' : 'STT API key → default');
+  deepgramKey = key || DEFAULT_DEEPGRAM_KEY;
+  log(key ? 'Deepgram key set' : 'Deepgram key → default');
 }
 
 export function hasPulseKey(): boolean {
-  return true;  // always available — proxy handles auth
+  return true;  // proxy handles auth
 }
 
 export function getPulseKey(): string {
-  return apiKey;
+  return deepgramKey;
+}
+
+/** Set OpenAI key (kept for reference / future direct-call support) */
+export function setPulseOpenAIKey(key: string | null | undefined): void {
+  openaiKey = key || null;
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// START / STOP — batch audio collection + periodic transcription
+// LANGUAGE LOCK
+// ═══════════════════════════════════════════════════════════════════
+
+/** Lock STT to a specific language (ISO 639-1 code like 'es', 'ja', 'fr').
+ *  The proxy passes this to Deepgram's language parameter, forcing it to
+ *  only transcribe that language. Pass null for auto-detect. */
+export function setPulseLanguage(lang: string | null | undefined): void {
+  lockedLanguage = lang || null;
+  log(lockedLanguage ? `[STT] Language locked → ${lockedLanguage}` : '[STT] Language → auto-detect');
+}
+
+export function getPulseLanguage(): string | null {
+  return lockedLanguage;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// START / STOP
 // ═══════════════════════════════════════════════════════════════════
 
 export function startPulseStream(): void {
@@ -86,9 +115,8 @@ export function startPulseStream(): void {
   fullTranscript = '';
   transcribing = false;
 
-  log('[STT] Batch mode started — collecting audio', 'success');
+  log(`[STT] Batch mode started${lockedLanguage ? ` — locked to ${lockedLanguage}` : ' — auto-detect'}`, 'success');
 
-  // Periodically send batched audio for transcription
   batchTimer = setInterval(() => {
     if (!streaming) return;
     processBatch();
@@ -103,13 +131,13 @@ export function stopPulseStream(): void {
     batchTimer = null;
   }
 
-  // Process any remaining audio
   if (audioChunks.length > 0 && !transcribing) {
     processBatch();
   }
 
   audioChunks = [];
   fullTranscript = '';
+  lockedLanguage = null;
   log('[STT] Batch mode stopped');
 }
 
@@ -123,7 +151,7 @@ export function isPulseActive(): boolean {
 
 export function sendAudioChunk(pcm: Uint8Array): void {
   if (!streaming || !pcm || pcm.length === 0) return;
-  audioChunks.push(new Uint8Array(pcm));  // defensive copy
+  audioChunks.push(new Uint8Array(pcm));
 }
 
 export function flushAudioBuffer(): void {
@@ -134,20 +162,21 @@ export function flushAudioBuffer(): void {
 
 // ═══════════════════════════════════════════════════════════════════
 // BATCH PROCESSING — combine chunks → base64 → POST to proxy
-// Same proven pattern as Sophicon ER-G2 speak.ts
+//
+// The proxy accepts: { audio: "<base64 PCM>", language?: "es" }
+// It wraps PCM in WAV, forwards to Deepgram nova-2 (primary)
+// or OpenAI gpt-4o-transcribe (fallback).
+// When language is set, Deepgram ONLY transcribes that language.
 // ═══════════════════════════════════════════════════════════════════
 
 async function processBatch(): Promise<void> {
   if (transcribing || audioChunks.length === 0) return;
 
-  // Grab current chunks and reset buffer
   const chunks = audioChunks;
   audioChunks = [];
 
-  // Combine all chunks into one buffer
   const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
   if (totalLen < MIN_AUDIO_BYTES) {
-    // Too little audio — put chunks back and wait for more
     audioChunks = chunks;
     return;
   }
@@ -159,7 +188,7 @@ async function processBatch(): Promise<void> {
     offset += chunk.length;
   }
 
-  // Encode to base64 (same as Sophicon)
+  // Encode to base64
   let binary = '';
   for (let i = 0; i < combined.length; i++) {
     binary += String.fromCharCode(combined[i]);
@@ -167,51 +196,103 @@ async function processBatch(): Promise<void> {
   const base64 = btoa(binary);
 
   transcribing = true;
-  log(`[STT] Transcribing ${totalLen} bytes...`);
+  log(`[STT] Transcribing ${totalLen} bytes${lockedLanguage ? ` (${lockedLanguage})` : ''}...`);
 
   try {
-    const resp = await fetch(TRANSCRIBE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio: base64 }),
-    });
+    // Build payload — language field triggers single-language lock on the proxy
+    const payload: Record<string, string> = { audio: base64 };
+    if (lockedLanguage) {
+      payload.language = lockedLanguage;
+    }
+    const body = JSON.stringify(payload);
+    const hdrs = { 'Content-Type': 'application/json' };
 
-    if (!resp.ok) {
-      const err = await resp.text();
-      log(`[STT] Transcribe failed: ${resp.status} ${err.slice(0, 60)}`, 'error');
+    // Try Lingua Franca proxy first, fall back to Sophicon
+    let resp: Response | null = null;
+    try {
+      resp = await fetch(TRANSCRIBE_URL, { method: 'POST', headers: hdrs, body });
+    } catch {
+      log('[STT] LF proxy unreachable, trying fallback...', 'error');
+    }
+
+    if (!resp || !resp.ok) {
+      if (resp) {
+        const err = await resp.text();
+        log(`[STT] LF proxy ${resp.status}: ${err.slice(0, 40)}, trying fallback...`, 'error');
+      }
+      try {
+        resp = await fetch(TRANSCRIBE_FALLBACK, { method: 'POST', headers: hdrs, body });
+      } catch {
+        log('[STT] Both proxies failed', 'error');
+        transcribing = false;
+        return;
+      }
+    }
+
+    if (!resp || !resp.ok) {
+      const err = resp ? await resp.text() : 'no response';
+      log(`[STT] Transcribe failed: ${err.slice(0, 60)}`, 'error');
       transcribing = false;
       return;
     }
 
     const data = await resp.json();
     const text = (data.text || '').trim();
+    const confidence = data.confidence || 0;
+    const engine = data.engine || 'unknown';
 
+    log(`[STT] Engine: ${engine}, lang: ${data.language || '?'}, conf: ${confidence > 0 ? (confidence * 100).toFixed(0) + '%' : 'n/a'}`);
+
+    // ── Ghost filtering — aggressive rejection of AC/ambient noise artifacts ──
     if (!text) {
       transcribing = false;
       return;
     }
 
-    const now = Date.now();
+    // Confidence gate — Deepgram returns 0–1, reject anything below 0.65
+    if (confidence > 0 && confidence < 0.65) {
+      log(`[STT] Low confidence (${(confidence * 100).toFixed(0)}%), skipping: "${text.slice(0, 30)}"`, 'error');
+      transcribing = false;
+      return;
+    }
 
-    // Reset rolling transcript if there was a long pause
+    // Word count gate — need at least 2 real words (AC hum = single gibberish word)
+    const wordCount = text.split(/\s+/).filter((w: string) => w.length > 0).length;
+    if (wordCount <= 1) {
+      log(`[STT] Single word, skipping: "${text}"`, 'error');
+      transcribing = false;
+      return;
+    }
+
+    // Short text gate — even 2 words must have some substance
+    if (text.length < 6) {
+      log(`[STT] Too short (${text.length} chars), skipping: "${text}"`, 'error');
+      transcribing = false;
+      return;
+    }
+
+    // Repetition gate — AC noise often produces repeated syllables/words
+    const words = text.toLowerCase().split(/\s+/);
+    const unique = new Set(words);
+    if (words.length >= 3 && unique.size === 1) {
+      log(`[STT] Repeated word, skipping: "${text}"`, 'error');
+      transcribing = false;
+      return;
+    }
+
+    const now = Date.now();
     if (now - lastTranscriptTime > TRANSCRIPT_RESET_MS) {
       fullTranscript = '';
     }
     lastTranscriptTime = now;
 
-    // Append to rolling transcript
-    if (fullTranscript) {
-      fullTranscript += ' ' + text;
-    } else {
-      fullTranscript = text;
-    }
+    fullTranscript = fullTranscript ? fullTranscript + ' ' + text : text;
 
     log(`[STT] "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`);
 
-    // Notify all listeners
     const result: PulseResult = {
       text: fullTranscript,
-      language: 'unknown',  // OpenAI Whisper auto-detects but doesn't always report
+      language: lockedLanguage || 'unknown',
       isFinal: true,
     };
 

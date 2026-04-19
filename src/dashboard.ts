@@ -22,7 +22,7 @@ import {
   type SavedPhrase, type QuizStats,
 } from './sync';
 import { startGlassesQuiz, pushPhraseToGlasses, setSpeakLang, setLearnLang, refreshGlassesForLanguageChange, startDialogueHUD, updateDialogueHUD, endSpeakMode, onGlassesPageChange, onGlassesAudio, simulateGlassesClick, type GlassesPageState } from './events';
-import { sendAudioChunk, onPulseResult, startPulseStream, stopPulseStream, flushAudioBuffer, setPulseKey, hasPulseKey, getPulseKey, type PulseResult } from './pulse-stt';
+import { sendAudioChunk, onPulseResult, startPulseStream, stopPulseStream, flushAudioBuffer, setPulseKey, hasPulseKey, getPulseKey, setPulseLanguage, setPulseOpenAIKey, type PulseResult } from './pulse-stt';
 import { initCustomPhraseBuilder, setCustomLang, setCustomSpeakLang, setCustomPushFn, renderGlassesPreview, retranslateSavedPhrase } from './custom-phrase';
 import { setOpenAIKey, hasOpenAIKey, getOpenAIKey, generateScenarioPhrases, cycleAISlot, type AIPhrase } from './ai-phrases';
 import { log } from './ui';
@@ -46,7 +46,7 @@ let speakTargetLangCode: LangCode | null = null;
 
 // Rolling suggestion refresh — regenerate AI options on a timer
 let rollingSuggestionTimer: ReturnType<typeof setInterval> | null = null;
-const ROLLING_SUGGESTION_MS = 16000;  // refresh suggestions every 16 seconds
+const ROLLING_SUGGESTION_MS = 20000;  // refresh suggestions every 20 seconds
 let lastRollingTranscript = '';        // track what transcript GPT last saw
 let currentSuggestions: string[] = []; // current suggestions on glasses
 let lastSTTText = '';                  // latest STT transcription text
@@ -185,6 +185,7 @@ export function initDashboard(): void {
     keySaveBtn.addEventListener('click', async () => {
       const key = keyInput.value.trim();
       setOpenAIKey(key);
+      setPulseOpenAIKey(key);
       await saveSettings({ openaiKey: key });
       log(key ? 'OpenAI key saved' : 'OpenAI key cleared');
     });
@@ -233,16 +234,23 @@ export function initDashboard(): void {
     const activeSuggestions = currentSuggestions.length > 0 ? currentSuggestions : ['Listening...'];
     await updateDialogueHUD(displayText, activeSuggestions, detectedLang);
 
-    // Debounce immediate AI response — triggers on new speech after 1.5s pause
-    if (sttDebounceTimer) clearTimeout(sttDebounceTimer);
-
-    if (result.text !== lastSTTText && result.text.trim().length > 5) {
+    // AI suggestion trigger — accumulate speech for 4s then fire
+    // Uses a "first speech starts timer" approach:
+    // - First new text starts a 4s timer (non-resetting)
+    // - Additional text updates the transcript but doesn't reset the timer
+    // - After 4s, fires suggestions with whatever we've accumulated
+    if (result.text !== lastSTTText && result.text.trim().length > 3) {
       lastSTTText = result.text;
 
-      sttDebounceTimer = setTimeout(async () => {
-        if (!speakActive) return;
-        await generateAndPushSuggestions(result.text, result.language);
-      }, 1500);
+      // Only start timer if one isn't already running
+      if (!sttDebounceTimer) {
+        sttDebounceTimer = setTimeout(async () => {
+          sttDebounceTimer = null;
+          if (!speakActive) return;
+          // Use the latest accumulated transcript
+          await generateAndPushSuggestions(lastSTTText, result.language);
+        }, 4000);  // 4s after first speech → think
+      }
     }
   });
 
@@ -256,21 +264,27 @@ export function initDashboard(): void {
 
 /**
  * Generate AI suggestions and push to both phone + glasses.
- * Called by: (1) STT result debounce, (2) rolling 16s timer.
+ * Called by: (1) STT result debounce, (2) rolling 20s timer.
  */
+// Suggestion cooldown — hold prompts for 10s before allowing refresh
+let lastSuggestionTime = 0;
+const SUGGESTION_COOLDOWN_MS = 10000;
+
 async function generateAndPushSuggestions(transcript: string, language: string): Promise<void> {
   if (!speakActive) return;
+
+  // Enforce 10s cooldown — hold prompts stable before refreshing
+  const now = Date.now();
+  if (now - lastSuggestionTime < SUGGESTION_COOLDOWN_MS && currentSuggestions.length > 0) {
+    log(`[GPT] Cooldown — ${Math.ceil((SUGGESTION_COOLDOWN_MS - (now - lastSuggestionTime)) / 1000)}s until next refresh`);
+    return;
+  }
 
   const targetForAI = (speakTargetLangCode || activeLang) as LangCode;
   const detectedLang = language !== 'unknown' ? language : undefined;
 
-  const hasGPT = hasOpenAIKey();
-  if (!hasGPT) {
-    log('[GPT] No OpenAI key — set in Settings for AI replies');
-  }
-
-  // Show "Thinking..." while GPT generates
-  await updateDialogueHUD(transcript, [hasGPT ? 'Thinking...' : 'Set OpenAI key for AI'], detectedLang);
+  // Show "Thinking..." while GPT generates (no hasOpenAIKey check — GPT is on proxy now)
+  await updateDialogueHUD(transcript, ['Thinking...'], detectedLang);
 
   // Generate suggestions
   const whisperCompat = {
@@ -279,7 +293,8 @@ async function generateAndPushSuggestions(transcript: string, language: string):
     translation: undefined as string | undefined,
   };
   const suggestions = await generateQuickResponses(whisperCompat, targetForAI);
-  log(`[GPT] ${hasGPT ? 'AI' : 'Fallback'}: ${suggestions.length} suggestions`);
+  lastSuggestionTime = Date.now();
+  log(`[GPT] ${suggestions.length} suggestions`);
 
   // Store for stable display between refreshes
   currentSuggestions = suggestions;
@@ -293,7 +308,7 @@ async function generateAndPushSuggestions(transcript: string, language: string):
     ).join('');
   }
 
-  // Push to glasses — triggers full rebuild (new list items)
+  // Push to glasses
   await updateDialogueHUD(transcript, suggestions, detectedLang);
 }
 
@@ -654,10 +669,15 @@ function handleGlassesPageChange(state: GlassesPageState): void {
     if (hud) hud.style.display = '';
     const theirLangEl = document.getElementById('speak-their-lang');
     if (theirLangEl) theirLangEl.textContent = state.langLabel || 'Detecting...';
-    // Open Deepgram WebSocket so glasses-initiated speak actually streams audio
+    // Let Deepgram auto-detect — don't lock STT language.
+    // The selected language drives UI + suggestion direction, not STT.
+    // Locking STT causes English speech to be misidentified as the target lang.
+    setPulseLanguage(null);
     if (hasPulseKey()) {
       startPulseStream();
-      log('Deepgram STT started (auto-detect mode)');
+      log(speakTargetLangCode
+        ? `STT started — suggestions for ${LANG_LABEL[speakTargetLangCode]} (auto-detect)`
+        : 'STT started (auto-detect mode)');
     } else {
       log('Set your Deepgram API key in Settings for live STT', 'error');
     }
@@ -759,8 +779,12 @@ async function handleSpeakStart(): Promise<void> {
   const sugEl = document.getElementById('speak-suggestions');
   if (sugEl) sugEl.innerHTML = '<div class="speak-option muted">Speak or let them speak...</div>';
 
-  // Push to glasses: dialogue HUD with auto-detect
+  // Push to glasses: dialogue HUD
   await startDialogueHUD();
+
+  // Don't lock STT language — let Deepgram auto-detect both sides of conversation.
+  // Selected language only drives UI + suggestion direction.
+  setPulseLanguage(null);
 
   // Start STT stream
   if (hasPulseKey()) {
@@ -817,10 +841,11 @@ async function handleSpeakStop(): Promise<void> {
 let conversationHistory: { role: string; text: string; lang: string }[] = [];
 
 /**
- * Generate AI-powered response suggestions using GPT.
- * Takes the Whisper transcription and generates contextual things to say back
- * in the target language.
+ * Generate AI-powered response suggestions via Lingua Franca proxy.
+ * Proxy calls GPT-4o-mini — no direct OpenAI calls from the webview.
  */
+const SUGGEST_URL = 'https://lingua-franca-api.vercel.app/api/suggest';
+
 async function generateQuickResponses(result: { text: string; language: string; translation?: string }, targetLang: LangCode): Promise<string[]> {
   // Add to conversation history
   conversationHistory.push({
@@ -831,16 +856,6 @@ async function generateQuickResponses(result: { text: string; language: string; 
   // Keep last 10 exchanges for context
   if (conversationHistory.length > 10) conversationHistory = conversationHistory.slice(-10);
 
-  const apiKey = getOpenAIKey();
-  if (!apiKey) {
-    // Fallback: simple template responses
-    return [
-      `Yes, I understand`,
-      `Can you repeat that?`,
-      `Tell me more`,
-    ];
-  }
-
   try {
     const targetName = LANG_LABEL[targetLang] || targetLang;
     const speakName = LANG_LABEL[currentSpeakLang] || 'English';
@@ -848,45 +863,27 @@ async function generateQuickResponses(result: { text: string; language: string; 
       `${h.role === 'them' ? 'Them' : 'You'}: ${h.text}`
     ).join('\n');
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await fetch(SUGGEST_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 300,
-        temperature: 0.8,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a real-time conversation assistant for smart glasses. The user speaks ${speakName} and is talking to someone who speaks ${targetName}.
-
-Given the conversation so far, suggest 3 SHORT responses the user could say next. Each response should be in ${targetName} with ${speakName} translation in parentheses.
-
-Format: one response per line, like:
-${targetName} phrase (${speakName} translation)
-
-Keep responses natural, casual, and contextually relevant. Max 10 words each.`,
-          },
-          {
-            role: 'user',
-            content: `Conversation:\n${recentContext}\n\nSuggest 3 responses I could say:`,
-          },
-        ],
+        conversation: recentContext,
+        targetLang: targetName,
+        speakLang: speakName,
       }),
     });
 
-    if (!resp.ok) return fallbackResponses();
+    if (!resp.ok) {
+      log(`[GPT] Suggest proxy failed: ${resp.status}`, 'error');
+      return fallbackResponses();
+    }
 
     const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    const lines = content.split('\n').filter((l: string) => l.trim().length > 0).slice(0, 3);
+    const lines = data.suggestions || [];
 
     return lines.length > 0 ? lines : fallbackResponses();
   } catch (e) {
-    console.warn('[LF] GPT response error:', e);
+    console.warn('[LF] GPT proxy error:', e);
     return fallbackResponses();
   }
 }

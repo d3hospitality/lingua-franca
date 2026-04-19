@@ -1139,17 +1139,19 @@ export function buildQuizScorePage(score: number, total: number, lang: string): 
 // ══════════════════════════════════════════════════════════════════
 
 // ── Dialogue HUD layout constants ──
-const DLG_IMG_W    = 80;     // width of flag/sprite images
-const DLG_IMG_H    = 80;     // height of flag/sprite images
+// Top zone shrunk to 76px (flag + label + transcript) to maximize
+// bottom zone for two-line suggestion items (target lang + translation)
+const DLG_IMG_W    = 64;     // width of flag/sprite images (compact)
+const DLG_IMG_H    = 64;     // height of flag/sprite images (compact)
 const DLG_PAD      = 4;      // edge padding
 const DLG_GAP      = 4;      // gap between image and text area
-const DLG_TOP_H    = 138;    // height of top zone (their speech)
-const DLG_DIVIDER  = 12;     // divider gap between zones
-const DLG_TEXT_X   = DLG_PAD + DLG_IMG_W + DLG_GAP;  // 88
-const DLG_TEXT_W   = 576 - DLG_TEXT_X - DLG_PAD;      // 484
-const DLG_LABEL_H  = 28;     // language label height
-const DLG_BOT_Y    = DLG_PAD + DLG_TOP_H + DLG_DIVIDER;   // 154
-const DLG_BOT_H    = 288 - DLG_BOT_Y - DLG_PAD;           // 130 (fits within display)
+const DLG_TOP_H    = 76;     // height of top zone (their speech) — shrunk from 138
+const DLG_DIVIDER  = 4;      // divider gap between zones — tighter
+const DLG_TEXT_X   = DLG_PAD + DLG_IMG_W + DLG_GAP;  // 72
+const DLG_TEXT_W   = 576 - DLG_TEXT_X - DLG_PAD;      // 500
+const DLG_LABEL_H  = 24;     // language label height (compact)
+const DLG_BOT_Y    = DLG_PAD + DLG_TOP_H + DLG_DIVIDER;   // 84
+const DLG_BOT_H    = 288 - DLG_BOT_Y - DLG_PAD;           // 200 — 50%+ more room for suggestions
 
 export interface DialogueHUDOptions {
   /** Detected language label, e.g. "Dutch", "Indonesian" */
@@ -1172,21 +1174,11 @@ export function buildDialogueHUDPage(opts: DialogueHUDOptions): RebuildPageConta
 
   // ── Top zone: their speech ──
 
-  // #41 — Detected language flag (top-left, updates when lang detected)
-  const langSprite = new ImageContainerProperty({
-    xPosition: DLG_PAD,
-    yPosition: DLG_PAD,
-    width: DLG_IMG_W,
-    height: DLG_IMG_H,
-    containerID: 41,
-    containerName: "dlg-lang-flag",
-  });
-
   // #42 — Detected language name (dynamic — "SPANISH", "DUTCH", etc.)
   const langLabel = new TextContainerProperty({
-    xPosition: DLG_TEXT_X,
+    xPosition: DLG_PAD,
     yPosition: DLG_PAD,
-    width: DLG_TEXT_W,
+    width: 568,
     height: DLG_LABEL_H,
     containerID: 42,
     containerName: "dlg-lang-name",
@@ -1194,52 +1186,77 @@ export function buildDialogueHUDPage(opts: DialogueHUDOptions): RebuildPageConta
     isEventCapture: 0,
   });
 
-  // #43 — Live TTS transcription + translation (top-right, below lang name)
-  // Keep it simple like Sophicon — no border/radius/padding (glasses OS renders cleaner)
+  // #43 — Live TTS transcription + translation (below lang name, full width)
   const ttsText = new TextContainerProperty({
-    xPosition: DLG_TEXT_X,
+    xPosition: DLG_PAD,
     yPosition: DLG_PAD + DLG_LABEL_H,
-    width: DLG_TEXT_W,
-    height: DLG_TOP_H - DLG_LABEL_H,
+    width: 568,
+    height: 68,
     containerID: 43,
     containerName: "dlg-tts-text",
     content: translation,
     isEventCapture: 0,
   });
 
-  // ── Bottom zone: your responses ──
+  // ── Suggestion text containers — 3 evenly spaced within bounds ──
+  // Bounds: x=4, y=100, w=568, h=180  →  each container ~56px tall with 6px gaps
+  const SUG_X = 4;
+  const SUG_Y = 100;
+  const SUG_W = 568;
+  const SUG_TOTAL_H = 180;
+  const SUG_COUNT = 3;
+  const SUG_GAP = 6;
+  const SUG_H = Math.floor((SUG_TOTAL_H - (SUG_COUNT - 1) * SUG_GAP) / SUG_COUNT);  // 56
 
-  // #44 — User's mother tongue flag (bottom-left, from settings or detection)
-  const userSprite = new ImageContainerProperty({
-    xPosition: DLG_PAD,
-    yPosition: DLG_BOT_Y,
-    width: DLG_IMG_W,
-    height: DLG_IMG_H,
-    containerID: 44,
-    containerName: "dlg-user-flag",
+  // #45 — Suggestion 1 (only this one gets event capture)
+  const sug1 = new TextContainerProperty({
+    xPosition: SUG_X,
+    yPosition: SUG_Y,
+    width: SUG_W,
+    height: SUG_H,
+    containerID: 45,
+    containerName: "dlg-sug1",
+    content: suggestions[0] || '',
+    isEventCapture: 1,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingLength: 4,
   });
 
-  // #45 — Content-aware response suggestions (scrollable, reactive)
-  const responseList = new ListContainerProperty({
-    xPosition: DLG_TEXT_X,
-    yPosition: DLG_BOT_Y,
-    width: DLG_TEXT_W,
-    height: DLG_BOT_H,
-    containerID: 45,
-    containerName: "dlg-responses",
-    itemContainer: new ListItemContainerProperty({
-      itemCount: suggestions.length,
-      itemWidth: 0,
-      isItemSelectBorderEn: 1,
-      itemName: suggestions,
-    }),
-    isEventCapture: 1,  // reactive — ring scroll to select
+  // #46 — Suggestion 2
+  const sug2 = new TextContainerProperty({
+    xPosition: SUG_X,
+    yPosition: SUG_Y + SUG_H + SUG_GAP,
+    width: SUG_W,
+    height: SUG_H,
+    containerID: 46,
+    containerName: "dlg-sug2",
+    content: suggestions[1] || '',
+    isEventCapture: 0,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingLength: 4,
+  });
+
+  // #47 — Suggestion 3
+  const sug3 = new TextContainerProperty({
+    xPosition: SUG_X,
+    yPosition: SUG_Y + (SUG_H + SUG_GAP) * 2,
+    width: SUG_W,
+    height: SUG_H,
+    containerID: 47,
+    containerName: "dlg-sug3",
+    content: suggestions[2] || '',
+    isEventCapture: 0,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingLength: 4,
   });
 
   return new RebuildPageContainer({
     containerTotalNum: 5,
-    listObject: [responseList],
-    textObject: [langLabel, ttsText],
-    imageObject: [langSprite, userSprite],
+    listObject: [],
+    textObject: [langLabel, ttsText, sug1, sug2, sug3],
+    imageObject: [],
   });
 }
