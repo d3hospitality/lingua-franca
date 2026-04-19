@@ -44,6 +44,13 @@ let composeMode: 'template' | 'ai' = 'template';
 let speakActive = false;
 let speakTargetLangCode: LangCode | null = null;
 
+// Rolling suggestion refresh — regenerate AI options on a timer
+let rollingSuggestionTimer: ReturnType<typeof setInterval> | null = null;
+const ROLLING_SUGGESTION_MS = 16000;  // refresh suggestions every 16 seconds
+let lastRollingTranscript = '';        // track what transcript GPT last saw
+let currentSuggestions: string[] = []; // current suggestions on glasses
+let lastSTTText = '';                  // latest STT transcription text
+
 // Current "I speak" language (tracked from tumbler — may be any I_SPEAK_CODES value)
 let currentSpeakLang: string = 'en';
 
@@ -193,9 +200,8 @@ export function initDashboard(): void {
     sendAudioChunk(pcm);
   });
 
-  // When Deepgram returns a transcription, update both phone HUD + glasses HUD
+  // When STT returns a transcription, update both phone HUD + glasses HUD
   let sttDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastSTTText = '';
 
   onPulseResult(async (result: PulseResult) => {
     if (!speakActive) return;
@@ -223,10 +229,11 @@ export function initDashboard(): void {
     const ttsEl = document.getElementById('speak-tts-text');
     if (ttsEl) ttsEl.textContent = displayText;
 
-    // Update glasses HUD with live transcription
-    await updateDialogueHUD(displayText, ['Listening...'], detectedLang);
+    // Update glasses HUD with live transcription — keep current suggestions stable
+    const activeSuggestions = currentSuggestions.length > 0 ? currentSuggestions : ['Listening...'];
+    await updateDialogueHUD(displayText, activeSuggestions, detectedLang);
 
-    // Debounce AI response generation — wait for speech to settle (1.5s pause)
+    // Debounce immediate AI response — triggers on new speech after 1.5s pause
     if (sttDebounceTimer) clearTimeout(sttDebounceTimer);
 
     if (result.text !== lastSTTText && result.text.trim().length > 5) {
@@ -234,46 +241,79 @@ export function initDashboard(): void {
 
       sttDebounceTimer = setTimeout(async () => {
         if (!speakActive) return;
-
-        log(`[STT] ${result.language}: "${result.text.slice(0, 40)}..."`);
-
-        // Use detected target language for AI responses (or fallback to activeLang)
-        const targetForAI = (speakTargetLangCode || activeLang) as LangCode;
-
-        // Check if OpenAI key is available for intelligent responses
-        const hasGPT = hasOpenAIKey();
-        if (!hasGPT) {
-          log('[GPT] No OpenAI key — using fallback responses. Set key in Settings.');
-        }
-
-        // Update glasses with "Thinking..." while GPT generates
-        await updateDialogueHUD(displayText, [hasGPT ? 'Thinking...' : 'Set OpenAI key for AI replies'], detectedLang);
-
-        // Generate AI response suggestions (uses GPT if key is set, fallback otherwise)
-        const whisperCompat = {
-          text: result.text,
-          language: result.language,
-          translation: undefined as string | undefined,
-        };
-        const suggestions = await generateQuickResponses(whisperCompat, targetForAI);
-        log(`[GPT] ${hasGPT ? 'AI' : 'Fallback'}: ${suggestions.length} suggestions`);
-
-        // Update phone suggestions
-        const sugEl = document.getElementById('speak-suggestions');
-        if (sugEl) {
-          sugEl.innerHTML = suggestions.map((s: string, i: number) =>
-            `<div class="speak-option" data-speak-idx="${i}">${escHtml(s)}</div>`
-          ).join('');
-        }
-
-        // Push final suggestions to glasses — this triggers a full rebuild (new list items)
-        await updateDialogueHUD(displayText, suggestions, detectedLang);
+        await generateAndPushSuggestions(result.text, result.language);
       }, 1500);
     }
   });
 
   // Global event delegation
   document.addEventListener('click', handleGlobalClick);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AI SUGGESTION ENGINE — shared by STT callback + rolling timer
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Generate AI suggestions and push to both phone + glasses.
+ * Called by: (1) STT result debounce, (2) rolling 16s timer.
+ */
+async function generateAndPushSuggestions(transcript: string, language: string): Promise<void> {
+  if (!speakActive) return;
+
+  const targetForAI = (speakTargetLangCode || activeLang) as LangCode;
+  const detectedLang = language !== 'unknown' ? language : undefined;
+
+  const hasGPT = hasOpenAIKey();
+  if (!hasGPT) {
+    log('[GPT] No OpenAI key — set in Settings for AI replies');
+  }
+
+  // Show "Thinking..." while GPT generates
+  await updateDialogueHUD(transcript, [hasGPT ? 'Thinking...' : 'Set OpenAI key for AI'], detectedLang);
+
+  // Generate suggestions
+  const whisperCompat = {
+    text: transcript,
+    language,
+    translation: undefined as string | undefined,
+  };
+  const suggestions = await generateQuickResponses(whisperCompat, targetForAI);
+  log(`[GPT] ${hasGPT ? 'AI' : 'Fallback'}: ${suggestions.length} suggestions`);
+
+  // Store for stable display between refreshes
+  currentSuggestions = suggestions;
+  lastRollingTranscript = transcript;
+
+  // Update phone suggestions
+  const sugEl = document.getElementById('speak-suggestions');
+  if (sugEl) {
+    sugEl.innerHTML = suggestions.map((s: string, i: number) =>
+      `<div class="speak-option" data-speak-idx="${i}">${escHtml(s)}</div>`
+    ).join('');
+  }
+
+  // Push to glasses — triggers full rebuild (new list items)
+  await updateDialogueHUD(transcript, suggestions, detectedLang);
+}
+
+/**
+ * Rolling suggestion refresh — called every 16s by the timer.
+ * Regenerates AI options so conversation stays dynamic even during
+ * pauses or when the other party is speaking at length.
+ */
+async function refreshRollingSuggestions(): Promise<void> {
+  if (!speakActive) return;
+
+  // Use the latest transcript we have
+  const transcript = lastSTTText || lastRollingTranscript;
+  if (!transcript || transcript.trim().length < 5) return;
+
+  // Skip if no conversation history has accumulated
+  if (conversationHistory.length === 0) return;
+
+  log('[GPT] Rolling refresh — generating fresh suggestions');
+  await generateAndPushSuggestions(transcript, speakTargetLangCode || 'unknown');
 }
 
 /** Show a glasses-driven section (home, speak, library, quiz, custom) */
@@ -623,10 +663,14 @@ function handleGlassesPageChange(state: GlassesPageState): void {
     }
   }
 
-  // If glasses left dialogue, reset speak state + stop Deepgram STT
+  // If glasses left dialogue, reset speak state + stop STT
   if (state.page === 'home' && speakActive) {
     speakActive = false;
     speakTargetLangCode = null;
+    if (rollingSuggestionTimer) { clearInterval(rollingSuggestionTimer); rollingSuggestionTimer = null; }
+    lastRollingTranscript = '';
+    currentSuggestions = [];
+    lastSTTText = '';
     flushAudioBuffer();
     stopPulseStream();
     const selectCard = document.getElementById('speak-select-card');
@@ -718,12 +762,22 @@ async function handleSpeakStart(): Promise<void> {
   // Push to glasses: dialogue HUD with auto-detect
   await startDialogueHUD();
 
-  // Start Deepgram STT stream
+  // Start STT stream
   if (hasPulseKey()) {
     startPulseStream();
   } else {
     log('Set your Deepgram API key in Settings for live STT', 'error');
   }
+
+  // Start rolling suggestion timer — refreshes AI options every 16s
+  // so the conversation options stay dynamic even during pauses
+  lastRollingTranscript = '';
+  currentSuggestions = [];
+  if (rollingSuggestionTimer) clearInterval(rollingSuggestionTimer);
+  rollingSuggestionTimer = setInterval(() => {
+    if (!speakActive) return;
+    refreshRollingSuggestions();
+  }, ROLLING_SUGGESTION_MS);
 
   log('Speak: auto-detect mode — conversation started');
 }
@@ -732,7 +786,16 @@ async function handleSpeakStop(): Promise<void> {
   speakActive = false;
   speakTargetLangCode = null;
 
-  // Stop Deepgram STT stream
+  // Stop rolling suggestion timer
+  if (rollingSuggestionTimer) {
+    clearInterval(rollingSuggestionTimer);
+    rollingSuggestionTimer = null;
+  }
+  lastRollingTranscript = '';
+  currentSuggestions = [];
+  lastSTTText = '';
+
+  // Stop STT stream
   flushAudioBuffer();
   stopPulseStream();
 
