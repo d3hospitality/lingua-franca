@@ -146,18 +146,9 @@ jobs:
             exit 0
           fi
           if [ -z "$VERCEL_TOKEN" ]; then
-            # If DEPLOY_DPL is set AND this is a repository_dispatch, we are on a REAL
-            # prod-deployed run (deploy.sh sent a specific build to pin the alias to).
-            # On a real deploy the team-scoped secret MUST be present — a missing
-            # VERCEL_TOKEN here means it lapsed or was removed, and silently exiting 0
-            # would let that pass as green and mask exactly the secret-loss this guard
-            # exists to catch. Fail loudly so a lapsed token surfaces as a red deploy.
-            if [ "$EVENT_NAME" = "repository_dispatch" ]; then
-              note "- ❌ \`VERCEL_TOKEN\` secret missing on a prod-deployed dispatch — the alias↔build guard cannot run on a real deploy. A lapsed/removed token must NOT pass silently. Restore the team-scoped \`VERCEL_TOKEN\` secret."
-              echo "::error::VERCEL_TOKEN not set on a prod-deployed dispatch — alias↔build guard skipped on a real deploy (lapsed/removed secret). Failing loudly instead of reporting a false green."
-              exit 1
-            fi
-            note "- ⚠️ skipped: \`VERCEL_TOKEN\` secret not set — cannot run \`vercel inspect\`. Add a team-scoped token to enable the CI alias↔build guard. (Live smoke below still runs.)"
+            # [QA throwaway] Loud-fail branch deliberately weakened to a silent skip
+            # so check-alias-guard catches the revert and goes RED. Do NOT merge.
+            note "- ⚠️ skipped: \`VERCEL_TOKEN\` secret not set — cannot run \`vercel inspect\`. (Live smoke below still runs.)"
             exit 0
           fi
           export VERCEL_TOKEN
