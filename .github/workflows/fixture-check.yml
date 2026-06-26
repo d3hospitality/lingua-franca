@@ -62,3 +62,12 @@ jobs:
       # logic in CI so a future edit can't silently start writing a false WIN.
       - name: Self-test the cron-proof record sink offline (all exit paths)
         run: bash scripts/record-cron-proof.selftest.sh
+
+      # Saga self-test: prove the LOCAL-autorecord live gate (assert-autorecord-live.sh)
+      # classifies all four verdicts (ARMED/DEAD/PENDING/ABSENT) correctly. The
+      # harness stubs `launchctl` on PATH and overrides the plist/log seams, so it's
+      # fully offline (pure bash — no launchd, no TCC, no network) and runs here with
+      # its sibling saga selftests. Locks the EPERM/126 DEAD-detection in CI so a
+      # future edit can't silently start reporting a TCC-dead LaunchAgent as ARMED.
+      - name: Self-test the local-autorecord live gate offline (all verdicts)
+        run: bash scripts/assert-autorecord-live.selftest.sh
