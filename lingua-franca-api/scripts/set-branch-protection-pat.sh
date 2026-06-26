@@ -120,6 +120,24 @@ echo ""
 bold "  → storing as repo secret $SECRET on $REPO"
 if printf '%s' "$PAT" | gh secret set "$SECRET" --repo "$REPO" >/dev/null 2>&1; then
   green "  DONE  $SECRET set. The next branch-protection-audit run will verify the gate (exit 0) instead of exit-2 warning."
+
+  # Record the KIND of token now in the secret as a (readable) repo variable so
+  # retire-bootstrap-token.sh can prove the bootstrap was really replaced before
+  # anyone revokes it. The secret value can't be read back, but its *prefix*
+  # tells us what it is. This is the single chokepoint that writes the secret, so
+  # the variable stays truthful for BOTH the mint (fine-grained) and any rollback
+  # (bootstrap) path. Best-effort: never fail the store if the variable write does.
+  case "$PAT" in
+    github_pat_*) KIND="fine-grained" ;;
+    gho_*)        KIND="bootstrap" ;;     # the broad gh-CLI OAuth token
+    ghp_*)        KIND="classic-pat" ;;
+    *)            KIND="unknown" ;;
+  esac
+  if gh variable set BRANCH_PROTECTION_PAT_KIND --repo "$REPO" --body "$KIND" >/dev/null 2>&1; then
+    green "  NOTE  recorded BRANCH_PROTECTION_PAT_KIND=$KIND (lets retire-bootstrap-token.sh gate safely)."
+  else
+    yellow "  NOTE  could not record BRANCH_PROTECTION_PAT_KIND (need 'variables' write); retire script will fall back to a live audit."
+  fi
   echo ""
   green "== branch-protection-audit is now armed with a verified token =="
   exit 0

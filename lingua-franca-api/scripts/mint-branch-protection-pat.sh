@@ -138,7 +138,9 @@ bold "Confirming the gate re-verifies with the rotated token (dispatches the aud
 if "$DIR/confirm-rotation.sh"; then
   echo ""
   green "== ROTATION COMPLETE — least-privilege PAT stored and the gate re-verified end-to-end. =="
-  green "   The bootstrap token can now be retired. Re-run this wizard when the 90-day PAT lapses."
+  green "   Now retire the bootstrap safely (gate-checks the FG-PAT is really live, then prints revoke steps):"
+  green "     ./scripts/retire-bootstrap-token.sh"
+  green "   Re-run this wizard when the 90-day PAT lapses."
   exit 0
 else
   rc=$?
