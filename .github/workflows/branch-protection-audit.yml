@@ -39,6 +39,8 @@ on:
       - 'lingua-franca-api/scripts/check-proof-armed.sh'
       - 'lingua-franca-api/scripts/run-saga-selftests.sh'
       - 'lingua-franca-api/scripts/run-saga-selftests.selftest.sh'
+      - 'lingua-franca-api/scripts/assert-schedule-jobs-sync-fired.sh'
+      - 'lingua-franca-api/scripts/assert-schedule-jobs-sync-fired.selftest.sh'
       - '.github/workflows/branch-protection-audit.yml'
       - '.github/workflows/schedule-fired-proof.yml'
 
