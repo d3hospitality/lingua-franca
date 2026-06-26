@@ -1,0 +1,73 @@
+# Unattended capture of the CRON-PROOF that branch-protection-audit's schedule
+# tick actually fired green on main — the wall-clock half no offline self-test can
+# fake (memory: check-schedule-fired-cron-verifier).
+#
+# WHY A SEPARATE WORKFLOW (and not a 4th job inside branch-protection-audit):
+# check-schedule-fired.sh reads `gh run list --event schedule --limit 1` for
+# branch-protection-audit. If it ran *as a job of* that same schedule run, the
+# newest schedule run it sees is ITSELF — still in_progress — so it would read
+# exit-2 PENDING forever and never prove anything. Run from a DISTINCT workflow a
+# few minutes LATER, the 13:17 audit run is already `completed`, so the verifier
+# sees a real finished run and can return a true 0 / 1.
+#
+# WHY 13:30 (audit fires 13:17): branch-protection-audit finishes in well under a
+# minute, so by :30 its schedule run is reliably completed. If it ever weren't,
+# the verifier returns exit-2 (in_progress → PENDING) which this workflow maps to
+# a neutral warning — never a false alarm. The coupling is safe by construction.
+#
+# This turns the one-time "run the verifier after the tick and confirm exit 0"
+# mission into a PERMANENT daily guarantee: every day this asserts yesterday's…
+# (today's) unattended audit tick fired and every required job was green, and
+# pages (job failure) only on a real regression (exit 1).
+name: schedule-fired-proof
+
+on:
+  schedule:
+    # 13:30 UTC daily — 13 min after branch-protection-audit's 13:17 tick, so its
+    # schedule run is completed and judgeable. Off the top of the hour to dodge
+    # Actions cron congestion.
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+  # Scoped push so this workflow INDEXES (a dispatch/schedule-only workflow won't
+  # register until a push/PR associates it — memory: github-dispatch-only-workflow-
+  # registration) and so edits to the verifier or this wrapper are smoke-tested on
+  # landing.
+  push:
+    branches:
+      - main
+    paths:
+      - 'lingua-franca-api/scripts/check-schedule-fired.sh'
+      - '.github/workflows/schedule-fired-proof.yml'
+
+jobs:
+  # Only the default GITHUB_TOKEN is needed: reading public run history requires no
+  # admin scope, so unlike audit-branch-protection this job can never be
+  # inconclusive for lack of a PAT — only for a transient gh/API blip (exit 2).
+  assert-schedule-tick-fired:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # exit 0 = a recent unattended schedule run of branch-protection-audit
+      #          finished green and every required job was green (PASS) ·
+      # exit 1 = the cron fired but the audit FAILED / a required job is red or
+      #          missing — the exact unattended regression to surface (FAIL the job) ·
+      # exit 2 = inconclusive: no schedule run yet (pre-first-tick), the newest is
+      #          still in_progress or too old, or gh/API was unreachable. Never a
+      #          regression — emit a neutral warning and pass so the daily proof
+      #          does not false-alarm before its window or on a blip.
+      - name: Confirm branch-protection-audit fired UNATTENDED on cron and finished green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          bash scripts/check-schedule-fired.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=schedule-fired-proof::Inconclusive (exit 2) — no completed schedule run of branch-protection-audit was judgeable yet (pre-tick, still running, stale, or gh/API blip). Cron NOT proven this run."
+            exit 0
+          fi
+          exit $rc
