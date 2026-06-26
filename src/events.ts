@@ -442,12 +442,33 @@ async function handleClick(bridge: EvenAppBridge, idx: number, baseUrl: string):
       return;
     }
 
-    // ── DIALOGUE HUD: tap a suggested response ──
+    // ── DIALOGUE HUD: click cycles through suggestion containers ──
     if (currentPage === "dialogue-hud") {
-      // User selected a response from the AI suggestions list
-      // TODO: speak the selected response via TTS output,
-      //       update the HUD with follow-up suggestions
-      log(`[DIALOGUE] Selected response idx=${idx}`);
+      // Advance to next suggestion (0→1→2→0)
+      dialogueSelectedIdx = (dialogueSelectedIdx + 1) % 3;
+
+      // Update all 3 containers — selected gets ▸ prefix, others plain
+      const sugContainers = [
+        { id: 45, name: "dlg-sug1" },
+        { id: 46, name: "dlg-sug2" },
+        { id: 47, name: "dlg-sug3" },
+      ];
+
+      for (let i = 0; i < sugContainers.length; i++) {
+        const sug = lastSuggestions[i] || '';
+        const content = i === dialogueSelectedIdx ? `▸ ${sug}` : sug;
+        try {
+          await bridgeRef!.textContainerUpgrade(new TextContainerUpgrade({
+            containerID: sugContainers[i].id,
+            containerName: sugContainers[i].name,
+            contentOffset: 0,
+            contentLength: content.length,
+            content,
+          }));
+        } catch { /* ignore upgrade failures on individual containers */ }
+      }
+
+      log(`[DIALOGUE] → suggestion ${dialogueSelectedIdx + 1}/3`);
       return;
     }
 
@@ -940,6 +961,7 @@ export async function startDialogueHUD(): Promise<void> {
   lastDetectedLang = languageLocked ? (speakTargetLang || null) : null;
   dialogueLayoutReady = false;
   lastSuggestions = [];
+  dialogueSelectedIdx = 0;
 
   // If language was locked from speak-select, show it immediately
   const initLang = languageLocked && speakTargetLang
@@ -975,6 +997,9 @@ export async function startDialogueHUD(): Promise<void> {
 
 /** Track the last detected language so we only re-push sprite when it changes */
 let lastDetectedLang: string | null = null;
+
+/** Dialogue HUD suggestion cycling — click advances through #45→#46→#47→#45 */
+let dialogueSelectedIdx = 0;
 
 /** Track whether the dialogue HUD layout has been built (so we can use fast text updates) */
 let dialogueLayoutReady = false;
@@ -1030,6 +1055,7 @@ export async function updateDialogueHUD(
     await bridgeRef.rebuildPageContainer(page);
     dialogueLayoutReady = true;
     lastSuggestions = [...suggestions];
+    dialogueSelectedIdx = 0;  // reset selection on new suggestions
     lastTextUpgradeMs = Date.now();
     log(`[HUD] Rebuild: "${translation.slice(0, 35)}..." + ${suggestions.length} suggestions`);
   } else {
