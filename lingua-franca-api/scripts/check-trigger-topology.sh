@@ -106,3 +106,5 @@ else
   red   "== trigger topology BROKEN — alias-guard-check could double-run, miss a main hotfix, or hang the gate. Fix alias-guard-check.yml =="
 fi
 exit $RC
+
+# topology probe b4fa359 — throwaway, reverted on close
