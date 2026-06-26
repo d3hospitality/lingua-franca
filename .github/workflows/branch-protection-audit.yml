@@ -35,6 +35,8 @@ on:
       - 'lingua-franca-api/scripts/check-schedule-fired.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.selftest.sh'
       - 'lingua-franca-api/scripts/check-proof-armed.sh'
+      - 'lingua-franca-api/scripts/run-saga-selftests.sh'
+      - 'lingua-franca-api/scripts/run-saga-selftests.selftest.sh'
       - '.github/workflows/branch-protection-audit.yml'
       - '.github/workflows/schedule-fired-proof.yml'
 
@@ -195,6 +197,41 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=audit-proof-armed::Inconclusive (exit 2) — gh/jq unavailable, API blip, or a workflow file absent. Pre-flight wiring NOT verified this run."
+            exit 0
+          fi
+          exit $rc
+
+  # WHOLE-APPARATUS ROLL-UP: the five jobs above each guard ONE dimension. This one
+  # asks the single pre-tick question no individual job answers — "is EVERY cron-proof
+  # guard's offline self-test still green right now?" run-saga-selftests.sh auto-discovers
+  # every scripts/*.selftest.sh, runs each in isolation, and emits one roll-up verdict, so
+  # a refactor that silently breaks one guard's self-test (hidden behind the others' greens)
+  # is caught in CI on landing rather than weeks later. Auto-discovery means any FUTURE saga
+  # self-test is covered the instant it lands — no edit to this workflow required. The saga
+  # self-tests stub `gh` on PATH and need only the real jq (preinstalled on ubuntu-latest):
+  # NO token, NO network — so this job can never be inconclusive for lack of a secret, and
+  # any non-zero exit is a true regression. It is itself one of the *.selftest.sh discovered,
+  # closing the loop: the roll-up runner's own self-test runs inside the roll-up it powers.
+  selftest-saga-aggregate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v5
+
+      # exit 0 = every discovered saga self-test passed (pass) ·
+      # exit 1 = at least one self-test failed — a true logic regression (FAIL the job) ·
+      # exit 2 = NOTHING FOUND: zero *.selftest.sh discovered (wrong dir / broken checkout).
+      # That is never a silent green, but it is an environment fault, not a logic
+      # regression — emit a neutral warning and pass so a flaky checkout can't page.
+      - name: Roll up every cron-proof guard's offline self-test into one verdict
+        run: |
+          set +e
+          bash scripts/run-saga-selftests.sh --quiet
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=selftest-saga-aggregate::Inconclusive (exit 2) — no *.selftest.sh discovered, likely a broken checkout or moved scripts dir. Apparatus roll-up NOT verified this run."
             exit 0
           fi
           exit $rc
