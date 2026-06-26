@@ -76,12 +76,39 @@ jobs:
       # workflow_dispatch + the daily scheduled canary).
       - name: Resolve target URL
         id: target
+        env:
+          PAYLOAD_URL: ${{ github.event.client_payload.url }}
+          DEPLOY_ID: ${{ github.event.client_payload.deploy_id }}
+          PAYLOAD_SRC: ${{ github.event.client_payload.source }}
+          STATUS_URL: ${{ github.event.deployment_status.environment_url }}
         run: |
-          URL="${{ github.event.client_payload.url }}"
-          [ -z "$URL" ] && URL="${{ github.event.deployment_status.environment_url }}"
-          [ -z "$URL" ] && URL="https://lingua-franca-api.vercel.app"
+          # Provenance: prove WHERE the target URL came from so a green run can't
+          # masquerade as "the loop works" when it actually fell back to the default.
+          if [ -n "$PAYLOAD_URL" ]; then
+            URL="$PAYLOAD_URL"; ORIGIN="repository_dispatch client_payload (real CLI deploy)"
+          elif [ -n "$STATUS_URL" ]; then
+            URL="$STATUS_URL"; ORIGIN="deployment_status environment_url (Vercel GitHub app)"
+          else
+            URL="https://lingua-franca-api.vercel.app"; ORIGIN="hardcoded fallback (manual/canary — NOT a deploy-triggered run)"
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Smoke target: $URL"
+          echo "Target origin: $ORIGIN"
+          echo "Deploy marker: deploy_id=${DEPLOY_ID:-<none>} source=${PAYLOAD_SRC:-<none>}"
+          # Surface it in the run summary so the deploy.sh closer can correlate at a glance.
+          {
+            echo "### smoke-prod target"
+            echo "- **URL:** \`$URL\`"
+            echo "- **Origin:** $ORIGIN"
+            echo "- **deploy_id:** \`${DEPLOY_ID:-<none>}\` · **source:** \`${PAYLOAD_SRC:-<none>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A prod-deployed dispatch MUST carry a URL — if it doesn't, the loop is
+          # broken (deploy.sh failed to populate client_payload) and we fail loudly
+          # rather than silently smoking the fallback and reporting a false green.
+          if [ "${{ github.event_name }}" = "repository_dispatch" ] && [ -z "$PAYLOAD_URL" ]; then
+            echo "::error::prod-deployed dispatch arrived with no client_payload.url — deploy.sh notify_ci is broken"
+            exit 1
+          fi
 
       # Full live gate: [1] routing/validation, [2] /api/suggest, [3] live transcribe
       # round-trip against the deployed endpoint. Non-zero exit fails the job and so

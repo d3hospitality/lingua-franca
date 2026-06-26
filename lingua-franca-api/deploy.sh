@@ -50,11 +50,25 @@ BASE="${SMOKE_BASE:-${ALIAS_URL:-${DEPLOY_URL:-https://lingua-franca-api.vercel.
 # GitHub app), so it never emits a deployment_status — this repository_dispatch is
 # the signal that re-runs .github/workflows/smoke-prod.yml's LIVE smoke gate on a
 # clean Linux runner. Non-fatal: a missing gh / failed dispatch only warns.
+#
+# We attach a UNIQUE deploy marker (client_payload.deploy_id) so the resulting
+# smoke-prod run can PROVE it was triggered by this real deploy and is smoking the
+# URL we handed it — not silently falling back to the hardcoded default alias.
+# Without it, BASE == the public alias == the workflow's fallback string, so a
+# green run is ambiguous: it could mean "the loop works" OR "the dispatch never
+# arrived and the daily canary/fallback ran." The marker disambiguates and closes
+# the loop the manual `gh api dispatches` simulation could never fully verify.
 notify_ci() {
   command -v gh >/dev/null 2>&1 || { red "  (gh not installed — skipping smoke-prod dispatch)"; return; }
+  local deploy_id="${DEPLOY_ID:-$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo nogit)-$(date -u +%Y%m%dT%H%M%SZ)}"
   if gh api -X POST repos/d3hospitality/lingua-franca/dispatches \
-       -f event_type=prod-deployed -f "client_payload[url]=$1" >/dev/null 2>&1; then
+       -f event_type=prod-deployed \
+       -f "client_payload[url]=$1" \
+       -f "client_payload[deploy_id]=$deploy_id" \
+       -f "client_payload[source]=deploy.sh" >/dev/null 2>&1; then
     green "  ✓ Notified GitHub Actions (repository_dispatch: prod-deployed → $1)"
+    green "    deploy_id=$deploy_id  (find the run: gh run list --workflow=smoke-prod-live.yml)"
+    DISPATCHED_DEPLOY_ID="$deploy_id"   # surfaced to caller for run correlation
   else
     red "  (repository_dispatch failed — smoke-prod not auto-triggered; check 'gh auth status')"
   fi
