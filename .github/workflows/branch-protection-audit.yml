@@ -34,6 +34,8 @@ on:
       - 'lingua-franca-api/scripts/check-merge-gate-all.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.selftest.sh'
+      - 'lingua-franca-api/scripts/check-schedule-jobs-sync.sh'
+      - 'lingua-franca-api/scripts/check-schedule-jobs-sync.selftest.sh'
       - 'lingua-franca-api/scripts/check-proof-armed.sh'
       - 'lingua-franca-api/scripts/run-saga-selftests.sh'
       - 'lingua-franca-api/scripts/run-saga-selftests.selftest.sh'
@@ -232,6 +234,44 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=selftest-saga-aggregate::Inconclusive (exit 2) — no *.selftest.sh discovered, likely a broken checkout or moved scripts dir. Apparatus roll-up NOT verified this run."
+            exit 0
+          fi
+          exit $rc
+
+  # DRIFT GUARD on the verifier's own coupling: check-schedule-fired.sh carries a
+  # HARD-CODED `JOBS` default (it cannot derive the job set at a historical run's
+  # head SHA, so it lists the jobs literally). That literal must stay in 1:1 sync
+  # with this workflow's real `jobs:` list — add a 7th audit job and forget to
+  # extend the default and the schedule verifier silently checks only 6, exactly
+  # the "added-a-job, missed-a-touch" class the saga keeps re-learning (PR #23, the
+  # 3-touch lesson). check-schedule-jobs-sync.sh parses BOTH lists from source (no
+  # token, no network — only awk/sed/sort) and compares them as sets, turning that
+  # comment-promise into a tested invariant that runs unattended on the daily tick.
+  # It is itself one of the jobs it counts, closing the loop: adding THIS job is the
+  # very 3-touch change it now guards, and it must report IN SYNC once all three
+  # touches land. NO token, NO network → it can never be inconclusive for lack of a
+  # secret; the only exit-2 is a missing source file (broken checkout), which is a
+  # neutral warning, never a paged regression.
+  audit-schedule-jobs-sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v5
+
+      # exit 0 = JOBS default == workflow jobs (in sync, pass) ·
+      # exit 1 = DRIFT — a job is in one set but not the other (FAIL the job: a
+      #          missed touch that would let the schedule verifier check a stale set) ·
+      # exit 2 = a source file is missing / unparseable (broken checkout) → neutral
+      #          warning, don't page as a logic regression.
+      - name: Assert check-schedule-fired's JOBS default matches this workflow's jobs
+        run: |
+          set +e
+          bash scripts/check-schedule-jobs-sync.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=audit-schedule-jobs-sync::Inconclusive (exit 2) — a source file (workflow or verifier) was missing or unparseable, likely a broken checkout. JOBS-default sync NOT verified this run."
             exit 0
           fi
           exit $rc
