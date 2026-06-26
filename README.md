@@ -28,3 +28,5 @@ npm run build
 # Deploy to Vercel
 vercel --prod
 ```
+
+<!-- QA throwaway: verifies check-alias-guard reports on an unrelated (README-only) PR instead of hanging as "Expected" (path-filter fix). Safe to revert. -->
