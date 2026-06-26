@@ -67,7 +67,18 @@ if [ -n "${CONTEXTS:-}" ]; then
   read -r -a REQUIRED <<< "$(printf '%s' "$CONTEXTS" | tr ',' ' ')"
   SRC="env CONTEXTS"
 else
+  # Reading branch protection needs admin scope. A non-admin token (e.g. CI's
+  # default GITHUB_TOKEN) gets HTTP 403, whose JSON error body gh prints to
+  # STDOUT — and on a non-2xx status the --jq filter is bypassed, so LIVE_BP
+  # would capture that raw body. Guard on BOTH the exit code AND the shape so
+  # the error body is never word-split into a context list (which would
+  # fabricate "absent required check" violations against every PR). Either
+  # signal means protection is unreadable → fall back to the known pair.
   LIVE_BP="$(gh api "repos/$REPO/branches/main/protection/required_status_checks" --jq '.contexts | join(" ")' 2>/dev/null)"
+  BP_RC=$?
+  if [ "$BP_RC" -ne 0 ] || printf '%s' "$LIVE_BP" | grep -q '[{}":]'; then
+    LIVE_BP=""
+  fi
   if [ -n "$LIVE_BP" ]; then
     read -r -a REQUIRED <<< "$LIVE_BP"
     SRC="live branch protection"
