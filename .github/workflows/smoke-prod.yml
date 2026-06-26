@@ -1,0 +1,74 @@
+# Post-deploy LIVE smoke gate for lingua-franca-api. Where fixture-check.yml proves
+# the OFFLINE half (the committed long-en.b64 decodes on Linux), THIS workflow runs
+# the FULL scripts/smoke-test.sh — including the [3] live transcribe round-trip — against
+# the real deployed endpoint after every production deploy. On a GitHub-hosted ubuntu
+# runner there is no macOS `say`/`afconvert`, so [3] automatically falls back to the
+# committed fixture: a genuine ~38.8s / 114-word audio POST to /api/transcribe that
+# verifies the vercel.json maxDuration=60 limit does NOT truncate long Whisper/Deepgram
+# transcriptions. This is the live truncation guard the offline check can't give us.
+#
+# Cost note: [2] and [3] make real paid GPT + Whisper/Deepgram calls against prod
+# (a few cents/run). It runs once per production deploy + a daily canary, not per push.
+name: smoke-prod
+
+on:
+  # PRIMARY trigger. This Vercel project deploys via the CLI (`npx vercel --prod`),
+  # NOT the GitHub app — verified: the project has no GitHub `link` and GitHub's
+  # deployments API shows zero Vercel deploys (only github-pages). So Vercel never
+  # emits a `deployment_status` here. Instead, lingua-franca-api/deploy.sh fires a
+  # `repository_dispatch` (event_type: prod-deployed) with the live URL in
+  # client_payload after a successful prod deploy. That is what gates this live smoke.
+  repository_dispatch:
+    types: [prod-deployed]
+  # Kept for the day this project is linked to the Vercel GitHub app — then real
+  # deployment_status events flow and the success/Production guard below applies.
+  deployment_status:
+  # Manual re-run from the Actions tab against the default prod alias.
+  workflow_dispatch:
+  # Daily canary: catches prod regressions that aren't tied to a deploy — expired
+  # API keys, upstream Whisper/Deepgram outages, Vercel function timeouts.
+  schedule:
+    - cron: '17 13 * * *'   # 13:17 UTC daily
+
+# Only one live smoke per ref at a time — avoid stacking paid runs on rapid deploys.
+concurrency:
+  group: smoke-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    # Skip preview deploys and failed deploys; run for manual/scheduled triggers.
+    if: >
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment_status.environment == 'Production')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # smoke-test.sh needs curl + python3; both ship on ubuntu-latest. Assert so a
+      # missing dep fails loudly instead of silently degrading a check to a skip.
+      - name: Verify smoke deps resolve on Linux
+        run: command -v bash && command -v curl && command -v python3 && command -v base64
+
+      # Prefer the exact URL the deploy just produced: client_payload.url from the
+      # CLI deploy hook (repository_dispatch), or environment_url from a real Vercel
+      # deployment_status. Otherwise fall back to the stable prod alias (covers
+      # workflow_dispatch + the daily scheduled canary).
+      - name: Resolve target URL
+        id: target
+        run: |
+          URL="${{ github.event.client_payload.url }}"
+          [ -z "$URL" ] && URL="${{ github.event.deployment_status.environment_url }}"
+          [ -z "$URL" ] && URL="https://lingua-franca-api.vercel.app"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Smoke target: $URL"
+
+      # Full live gate: [1] routing/validation, [2] /api/suggest, [3] live transcribe
+      # round-trip against the deployed endpoint. Non-zero exit fails the job and so
+      # surfaces a bad production deploy as a red check.
+      - name: Run live smoke gate (incl. [3] transcribe round-trip)
+        run: bash scripts/smoke-test.sh "${{ steps.target.outputs.url }}"
