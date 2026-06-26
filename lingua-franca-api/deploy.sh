@@ -29,9 +29,22 @@ if ! npx vercel --prod 2>&1 | tee "$DEPLOY_LOG"; then
   exit 1
 fi
 
-# Last https:// line vercel prints is the production deployment URL.
-DEPLOY_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG" | tail -n1)"
-BASE="${SMOKE_BASE:-${DEPLOY_URL:-https://lingua-franca-api.vercel.app}}"
+# ── Resolve the base URL the smoke test targets ───────────────────────────────
+# Prefer the STABLE PUBLIC production alias over the deployment-specific URL.
+# Vercel prints both on a prod deploy:
+#   Production   https://<id>-<team>-projects.vercel.app   ← deployment-specific
+#   ▲ Aliased    https://lingua-franca-api.vercel.app      ← stable public alias
+# The deployment-specific host sits behind Vercel Deployment Protection and
+# 302-redirects unauthenticated traffic, so smoke checks against it ALL fail with
+# 302 (and that same bad URL would be handed to CI via client_payload, failing the
+# smoke-prod gate too). The alias is public. Resolution order:
+#   SMOKE_BASE → "▲ Aliased" line → any non-deployment-scoped *.vercel.app →
+#   deployment URL → hardcoded default.
+ALL_URLS="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG")"
+ALIAS_URL="$(grep -i 'alias' "$DEPLOY_LOG" | grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' | tail -n1)"
+[ -z "$ALIAS_URL" ] && ALIAS_URL="$(printf '%s\n' "$ALL_URLS" | grep -vE '\-projects\.vercel\.app$' | tail -n1)"
+DEPLOY_URL="$(printf '%s\n' "$ALL_URLS" | tail -n1)"
+BASE="${SMOKE_BASE:-${ALIAS_URL:-${DEPLOY_URL:-https://lingua-franca-api.vercel.app}}}"
 
 # Notify GitHub Actions that prod was deployed. Vercel deploys here via CLI (no
 # GitHub app), so it never emits a deployment_status — this repository_dispatch is
