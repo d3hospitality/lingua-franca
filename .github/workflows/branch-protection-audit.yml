@@ -31,6 +31,8 @@ on:
       - 'lingua-franca-api/scripts/check-branch-protection.sh'
       - 'lingua-franca-api/scripts/check-merge-gate.sh'
       - 'lingua-franca-api/scripts/check-merge-gate-all.sh'
+      - 'lingua-franca-api/scripts/check-schedule-fired.sh'
+      - 'lingua-franca-api/scripts/check-schedule-fired.selftest.sh'
       - '.github/workflows/branch-protection-audit.yml'
 
 jobs:
@@ -84,6 +86,39 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=audit-merge-gate::Inconclusive (exit 2) — gh/API was unreachable or unauthenticated. Behavioural gate NOT verified this run."
+            exit 0
+          fi
+          exit $rc
+
+  # OFFLINE LOGIC GUARD: the cron verifier check-schedule-fired.sh has only ever
+  # executed its PENDING/exit-2 path in the wild (until the 13:17 UTC tick fires
+  # green on main, its success/regression branches never run). This job runs the
+  # self-test harness, which stubs `gh` on PATH and drives ALL 8 exit paths
+  # (0=green, 1=regression, 2=inconclusive) offline — so a stealth edit that
+  # flips e.g. a `!=` to `==` and lets a RED unattended run read as PASS is caught
+  # in CI on landing, not weeks later in a silent audit rot. Needs NO token and NO
+  # network (only the real jq, preinstalled on ubuntu-latest): it can never be
+  # inconclusive, so any non-zero here is a true logic regression — fail the job.
+  selftest-schedule-verifier:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # exit 0 = all 8 stubbed exit-path scenarios behave as specified ·
+      # exit 1 = check-schedule-fired.sh's exit logic drifted (FAIL — a regression) ·
+      # exit 2 = jq unavailable (harness skipped). jq ships on ubuntu-latest, so
+      # treat exit 2 as an environment fault worth surfacing, but don't page it as
+      # a logic regression — emit a neutral warning and pass.
+      - name: Self-test the schedule-fired cron verifier offline (all exit paths)
+        run: |
+          set +e
+          bash scripts/check-schedule-fired.selftest.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=selftest-schedule-verifier::Inconclusive (exit 2) — jq was unavailable on the runner, so the harness was skipped. Verifier logic NOT proven this run."
             exit 0
           fi
           exit $rc
