@@ -1,0 +1,37 @@
+# Runs the alias↔build loud-fail regression canary (check-alias-guard.sh) on every
+# push/PR so a silent revert of the "fail loudly when VERCEL_TOKEN lapsed on a
+# prod-deployed dispatch" branch in smoke-prod-live.yml is caught in review —
+# instead of relying on a human to run the canary by hand. Triggers on changes to
+# either the guard scripts OR smoke-prod-live.yml itself (where a revert would land).
+name: alias-guard-check
+
+on:
+  push:
+    paths:
+      - 'lingua-franca-api/scripts/**'
+      - '.github/workflows/smoke-prod-live.yml'
+      - '.github/workflows/alias-guard-check.yml'
+  pull_request:
+    paths:
+      - 'lingua-franca-api/scripts/**'
+      - '.github/workflows/smoke-prod-live.yml'
+  workflow_dispatch:
+
+jobs:
+  check-alias-guard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-latest ships bash + GNU grep; assert they resolve so a missing dep
+      # fails loudly rather than the guard skipping silently.
+      - name: Verify guard deps resolve on Linux
+        run: command -v bash && command -v grep
+
+      # The guard exits non-zero if the alias↔build step can no longer fail loudly
+      # on a lapsed VERCEL_TOKEN — i.e. if the loud-fail branch was reverted.
+      - name: Run alias↔build loud-fail guard
+        run: bash scripts/check-alias-guard.sh
