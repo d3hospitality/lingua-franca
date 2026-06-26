@@ -49,7 +49,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # exit 0 = a recent unattended schedule run of branch-protection-audit
       #          finished green and every required job was green (PASS) ·

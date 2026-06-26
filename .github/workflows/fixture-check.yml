@@ -22,7 +22,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ubuntu-latest already ships bash, coreutils (base64 -d), mawk and python3;
       # assert they're present so a missing dep fails loudly rather than skipping.

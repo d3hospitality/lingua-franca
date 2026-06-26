@@ -63,7 +63,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # smoke-test.sh needs curl + python3; both ship on ubuntu-latest. Assert so a
       # missing dep fails loudly instead of silently degrading a check to a skip.
