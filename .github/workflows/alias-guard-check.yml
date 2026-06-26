@@ -7,6 +7,14 @@ name: alias-guard-check
 
 on:
   push:
+    # Scoped to the default branch ONLY. The pull_request trigger below already
+    # runs on every PR (it's the required gate), so a push trigger on PR feature
+    # branches just duplicates that run — two identical ~seconds jobs per PR that
+    # touches these paths, wasting Actions minutes. Restricting push to main keeps
+    # the one case pull_request can't see — a direct-to-main commit that bypasses a
+    # PR (admin merge, hotfix push) — while dropping the redundant PR-branch run.
+    branches:
+      - main
     paths:
       - 'lingua-franca-api/scripts/**'
       - '.github/workflows/smoke-prod-live.yml'
@@ -37,3 +45,11 @@ jobs:
       # on a lapsed VERCEL_TOKEN — i.e. if the loud-fail branch was reverted.
       - name: Run alias↔build loud-fail guard
         run: bash scripts/check-alias-guard.sh
+
+      # Asserts this workflow's own triggers stay single-run-per-PR: push scoped
+      # to main, push.paths still watches the guard scripts, and pull_request
+      # carries no path filter (so the required gate can't hang). Catches a
+      # silent re-broadening of the triggers that would double-run every PR or
+      # block unrelated ones.
+      - name: Run trigger-topology guard
+        run: bash scripts/check-trigger-topology.sh
