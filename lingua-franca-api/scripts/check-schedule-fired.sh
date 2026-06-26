@@ -14,7 +14,7 @@
 # Manual dispatch can therefore read green forever while the unattended path rots.
 #
 # This script closes that loop: it asserts a *schedule*-event run on `main` exists,
-# is recent, finished `success`, AND that BOTH constituent jobs individually
+# is recent, finished `success`, AND that EVERY constituent job individually
 # concluded green. It is the behavioural proof of the cron tick — the half no
 # config/topology guard can see, because only the wall clock can trigger it.
 #
@@ -27,10 +27,12 @@
 #          JOBS       (space/comma list of job ids that must each be green;
 #                      default "audit-branch-protection audit-merge-gate
 #                      selftest-schedule-verifier audit-proof-armed
-#                      audit-required-checks-topology" — ALL jobs the workflow
-#                      currently defines, so a job silently skipped/removed on the
-#                      unattended path is caught even when overall conclusion is
-#                      'success', which skipped jobs do not flip to failure)
+#                      audit-required-checks-topology selftest-saga-aggregate" —
+#                      ALL 6 jobs the workflow currently defines (kept in 1:1 sync
+#                      with the YAML by check-proof-armed.sh layer 3), so a job
+#                      silently skipped/removed on the unattended path is caught
+#                      even when overall conclusion is 'success', which skipped
+#                      jobs do not flip to failure)
 # Exit:    0 = a recent unattended schedule run finished green, all jobs green
 #          1 = a schedule run fired but FAILED (or a required job is red/missing
 #              despite having existed when the run fired) — the regression the
