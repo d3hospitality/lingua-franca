@@ -1,13 +1,15 @@
-# Daily audit that `check-alias-guard` is STILL a required status check on main.
+# Daily audit that the required status checks are STILL required on main:
+#   • check-alias-guard — alias-guard YAML/topology gate
+#   • check-fixture     — offline fixture-integrity gate (fixture-check.yml)
 #
 # The topology guard (check-trigger-topology.sh, run by alias-guard-check.yml)
-# locks the workflow YAML so the alias-guard job keeps firing once per PR. It is
-# blind, though, to branch protection: if `check-alias-guard` is silently dropped
-# from main's required status contexts, the job still runs green but no longer
-# BLOCKS merges. Nothing in-repo catches that — reading branch protection needs
-# admin rights the per-PR GITHUB_TOKEN doesn't have. This scheduled job carries a
-# PAT (secret BRANCH_PROTECTION_PAT) with admin:repo read and asserts the gate is
-# live every day, surfacing a silently-dropped required check within 24h.
+# locks the workflow YAML so those jobs keep firing once per PR. It is blind,
+# though, to branch protection: if either context is silently dropped from main's
+# required status contexts, the job still runs green but no longer BLOCKS merges.
+# Nothing in-repo catches that — reading branch protection needs admin rights the
+# per-PR GITHUB_TOKEN doesn't have. This scheduled job carries a PAT (secret
+# BRANCH_PROTECTION_PAT) with admin:repo read and asserts both gates are live
+# every day, surfacing a silently-dropped required check within 24h.
 name: branch-protection-audit
 
 on:
@@ -37,7 +39,7 @@ jobs:
       # exit 0 = gate live (pass) · exit 1 = context dropped (FAIL the job) ·
       # exit 2 = inconclusive, e.g. PAT secret absent (neutral warning, don't fail
       # — a missing secret or API blip must not page as a real regression).
-      - name: Assert check-alias-guard is a required status check
+      - name: Assert check-alias-guard and check-fixture are required status checks
         env:
           GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_PAT }}
         run: |
