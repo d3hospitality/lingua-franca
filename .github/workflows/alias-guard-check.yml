@@ -11,10 +11,12 @@ on:
       - 'lingua-franca-api/scripts/**'
       - '.github/workflows/smoke-prod-live.yml'
       - '.github/workflows/alias-guard-check.yml'
+  # Runs on EVERY PR to main (no path filter) — this check is a required status
+  # gate via branch protection, and a path-filtered required check hangs forever
+  # as "Expected — waiting for status to be reported" on PRs that don't touch the
+  # filtered paths. The guard is self-contained (no secrets/network, ~seconds) so
+  # running it on every PR is cheap and keeps the gate from blocking unrelated PRs.
   pull_request:
-    paths:
-      - 'lingua-franca-api/scripts/**'
-      - '.github/workflows/smoke-prod-live.yml'
   workflow_dispatch:
 
 jobs:
