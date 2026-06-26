@@ -26,7 +26,8 @@
 #                      default 26h, i.e. one daily tick + ~2h cron jitter slack)
 #          JOBS       (space/comma list of job ids that must each be green;
 #                      default "audit-branch-protection audit-merge-gate
-#                      selftest-schedule-verifier" — ALL THREE jobs the workflow
+#                      selftest-schedule-verifier audit-proof-armed
+#                      audit-required-checks-topology" — ALL jobs the workflow
 #                      currently defines, so a job silently skipped/removed on the
 #                      unattended path is caught even when overall conclusion is
 #                      'success', which skipped jobs do not flip to failure)
@@ -42,7 +43,7 @@ REPO="${REPO:-d3hospitality/lingua-franca}"
 WORKFLOW="${WORKFLOW:-branch-protection-audit.yml}"
 BRANCH="${BRANCH:-main}"
 MAX_AGE_H="${MAX_AGE_H:-26}"
-JOBS_RAW="${JOBS:-audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed}"
+JOBS_RAW="${JOBS:-audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology}"
 read -r -a JOBS <<< "$(printf '%s' "$JOBS_RAW" | tr ',' ' ')"
 
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
