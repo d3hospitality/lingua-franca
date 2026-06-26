@@ -20,6 +20,15 @@ on:
   # client_payload after a successful prod deploy. That is what gates this live smoke.
   repository_dispatch:
     types: [prod-deployed]
+  # Self-gate on edits to this workflow file. Two reasons: (1) a dispatch-only
+  # workflow (no push/PR trigger) is NOT indexed or dispatchable on GitHub until a
+  # push/PR event first associates it on the default branch — this push trigger is
+  # what registers it; (2) it re-runs the live smoke whenever the gate itself
+  # changes, so a broken edit is caught immediately. Scoped to this one file, so the
+  # paid run only fires on the rare occasion the smoke definition is edited.
+  push:
+    paths:
+      - '.github/workflows/smoke-prod.yml'
   # Kept for the day this project is linked to the Vercel GitHub app — then real
   # deployment_status events flow and the success/Production guard below applies.
   deployment_status:
