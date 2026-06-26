@@ -37,6 +37,7 @@ on:
       - main
     paths:
       - 'lingua-franca-api/scripts/check-schedule-fired.sh'
+      - 'lingua-franca-api/scripts/assert-schedule-jobs-sync-fired.sh'
       - '.github/workflows/schedule-fired-proof.yml'
 
 jobs:
@@ -68,6 +69,44 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=schedule-fired-proof::Inconclusive (exit 2) — no completed schedule run of branch-protection-audit was judgeable yet (pre-tick, still running, stale, or gh/API blip). Cron NOT proven this run."
+            exit 0
+          fi
+          exit $rc
+
+  # Sibling proof for the schedule-jobs-sync saga. assert-schedule-jobs-sync-fired.sh
+  # is the mission-closer that goes DEEPER than conclusion=success: it reads the
+  # audit-schedule-jobs-sync job's LOG to confirm check-schedule-jobs-sync.sh actually
+  # printed `IN SYNC (exit 0)` on a real unattended tick. Until this job existed the
+  # closer was only ever run by a human after the tick (the saga's last wall-clock
+  # step). Running it here — same DISTINCT-workflow / 13:30 reasoning as above — turns
+  # that one-time manual paste into a PERMANENT daily guarantee: it pages (exit 1) only
+  # if a tick fires with the JOBS↔workflow drift guard red or its IN-SYNC marker
+  # missing, and stays neutral (exit 2 → warning) pre-tick or on a gh/API blip.
+  assert-jobs-sync-fired:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v5
+
+      # exit 0 = a recent unattended schedule run's audit-schedule-jobs-sync job
+      #          logged `IN SYNC (exit 0)` — the drift guard fired green (PASS) ·
+      # exit 1 = the cron fired but the job is red / its IN-SYNC marker is absent /
+      #          the job was skipped or dropped at the run's head SHA — the exact
+      #          unattended regression to surface (FAIL the job) ·
+      # exit 2 = inconclusive: no schedule run yet, the newest is in_progress / stale,
+      #          the job was added after the latest run fired, its log was unreadable,
+      #          or gh/API was unreachable. Never a regression — neutral warning, pass.
+      - name: Confirm audit-schedule-jobs-sync logged IN SYNC on an UNATTENDED cron tick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          bash scripts/assert-schedule-jobs-sync-fired.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=schedule-jobs-sync-proof::Inconclusive (exit 2) — no completed schedule run with the audit-schedule-jobs-sync job was judgeable yet (pre-tick, still running, stale, job added-after, log unreadable, or gh/API blip). Drift guard NOT proven this run."
             exit 0
           fi
           exit $rc
