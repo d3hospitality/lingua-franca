@@ -79,6 +79,7 @@ jobs:
         env:
           PAYLOAD_URL: ${{ github.event.client_payload.url }}
           DEPLOY_ID: ${{ github.event.client_payload.deploy_id }}
+          DEPLOY_DPL: ${{ github.event.client_payload.deploy_dpl }}
           PAYLOAD_SRC: ${{ github.event.client_payload.source }}
           STATUS_URL: ${{ github.event.deployment_status.environment_url }}
         run: |
@@ -94,13 +95,14 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Smoke target: $URL"
           echo "Target origin: $ORIGIN"
-          echo "Deploy marker: deploy_id=${DEPLOY_ID:-<none>} source=${PAYLOAD_SRC:-<none>}"
+          echo "Deploy marker: deploy_id=${DEPLOY_ID:-<none>} deploy_dpl=${DEPLOY_DPL:-<none>} source=${PAYLOAD_SRC:-<none>}"
+          echo "deploy_dpl=${DEPLOY_DPL}" >> "$GITHUB_OUTPUT"
           # Surface it in the run summary so the deploy.sh closer can correlate at a glance.
           {
             echo "### smoke-prod target"
             echo "- **URL:** \`$URL\`"
             echo "- **Origin:** $ORIGIN"
-            echo "- **deploy_id:** \`${DEPLOY_ID:-<none>}\` · **source:** \`${PAYLOAD_SRC:-<none>}\`"
+            echo "- **deploy_id:** \`${DEPLOY_ID:-<none>}\` · **deploy_dpl:** \`${DEPLOY_DPL:-<none>}\` · **source:** \`${PAYLOAD_SRC:-<none>}\`"
           } >> "$GITHUB_STEP_SUMMARY"
           # A prod-deployed dispatch MUST carry a URL — if it doesn't, the loop is
           # broken (deploy.sh failed to populate client_payload) and we fail loudly
@@ -108,6 +110,58 @@ jobs:
           if [ "${{ github.event_name }}" = "repository_dispatch" ] && [ -z "$PAYLOAD_URL" ]; then
             echo "::error::prod-deployed dispatch arrived with no client_payload.url — deploy.sh notify_ci is broken"
             exit 1
+          fi
+
+      # Mirror of deploy.sh's local "1b" check, on the clean Linux runner. deploy.sh
+      # proves the public alias serves the EXACT build it just shipped (via
+      # verify-alias.sh), but that assertion only runs on the deploying machine — the
+      # alias could still drift (or never finish promoting) by the time this gate
+      # runs, and the live smoke below would then validate a stale-but-healthy
+      # deployment and report a false green. This step re-runs the SAME assertion
+      # here, pinning the alias to the dispatched build's dpl_ id, so a green smoke
+      # provably tested THIS deploy — not just "a healthy URL".
+      #
+      # Reuses scripts/verify-alias.sh verbatim (single source of truth). It needs
+      # `vercel inspect`, so a VERCEL_TOKEN secret must be present; the token must
+      # belong to the team that owns the deployment. Graceful degradation, matching
+      # how deploy.sh treats a verify-alias prereq miss (warn, continue — the live
+      # smoke still runs and still gates the deploy):
+      #   • no deploy_dpl in payload (manual run / daily canary, or a deploy.sh too
+      #     old to send it) → nothing to pin against → skip.
+      #   • no VERCEL_TOKEN secret → can't inspect → skip (with a nudge to add it).
+      #   • verify-alias exit 2 (prereq/unresolvable) → warn, continue.
+      #   • verify-alias exit 1 (alias serves a DIFFERENT dpl) → FAIL the job before
+      #     the live smoke can validate the wrong build.
+      - name: Assert alias serves the dispatched build (alias↔build)
+        env:
+          DEPLOY_DPL: ${{ steps.target.outputs.deploy_dpl }}
+          URL: ${{ steps.target.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          note() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          echo "### alias↔build assertion" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$DEPLOY_DPL" ]; then
+            note "- ⏭️ skipped: no \`client_payload.deploy_dpl\` (manual/canary run, or a deploy.sh predating this field) — no specific build to pin the alias to."
+            exit 0
+          fi
+          if [ -z "$VERCEL_TOKEN" ]; then
+            note "- ⚠️ skipped: \`VERCEL_TOKEN\` secret not set — cannot run \`vercel inspect\`. Add a team-scoped token to enable the CI alias↔build guard. (Live smoke below still runs.)"
+            exit 0
+          fi
+          export VERCEL_TOKEN
+          # Retries a touch higher than the local default: a runner can start before
+          # alias promotion has fully propagated. dpl_ id is passed as arg 1 so
+          # verify-alias skips re-inspecting it and only polls the alias side.
+          if bash scripts/verify-alias.sh "$DEPLOY_DPL" "$URL" --retries 8 --delay 5; then
+            note "- ✅ alias \`$URL\` serves the dispatched build \`$DEPLOY_DPL\` — the live smoke tests the exact deploy, not a stale one."
+          else
+            rc=$?
+            if [ "$rc" -eq 1 ]; then
+              note "- ❌ alias \`$URL\` does NOT serve \`$DEPLOY_DPL\` — it points at a different (stale) deployment. Failing before the live smoke validates the wrong build."
+              echo "::error::alias↔build mismatch — $URL is not serving dispatched dpl $DEPLOY_DPL"
+              exit 1
+            fi
+            note "- ⚠️ verify-alias prereq failure (exit $rc) — could not prove the alias↔build link (no vercel CLI, token scope, or unresolvable id). Continuing; live smoke still runs."
           fi
 
       # Full live gate: [1] routing/validation, [2] /api/suggest, [3] live transcribe

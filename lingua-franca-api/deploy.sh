@@ -46,6 +46,45 @@ ALIAS_URL="$(grep -i 'alias' "$DEPLOY_LOG" | grep -Eo 'https://[A-Za-z0-9.-]+\.v
 DEPLOY_URL="$(printf '%s\n' "$ALL_URLS" | tail -n1)"
 BASE="${SMOKE_BASE:-${ALIAS_URL:-${DEPLOY_URL:-https://lingua-franca-api.vercel.app}}}"
 
+# ── 1b. Assert the alias serves THIS exact build (not a stale healthy one) ────
+# Smoking the public alias only proves "the alias serves a healthy build" — it
+# could be a prior deployment if Vercel hadn't finished promoting our new build
+# to the alias. verify-alias.sh inspects both the just-deployed URL and the alias
+# via `vercel inspect --json` and requires their dpl_ ids match, upgrading the
+# guarantee to "this exact build is live" before we spend time smoking it.
+# Skipped when SMOKE_BASE is a user override (the alias↔deploy link no longer
+# applies) or when smoking the raw deployment URL (no alias to verify).
+VERIFY_TARGET="${ALIAS_URL:-$BASE}"
+# Resolved dpl_ id of the build we just shipped. Captured here so we can hand it to
+# CI in the dispatch payload — the smoke-prod-live workflow re-runs the SAME
+# alias↔build assertion on a clean Linux runner, and needs this id to know which
+# build the alias must be serving. Empty if vercel/python3 are unavailable.
+DEPLOY_DPL=""
+resolve_dpl() {  # <url-or-dpl> -> deployment id (dpl_…) or empty
+  npx --yes vercel inspect "$1" --json 2>/dev/null \
+    | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin); print(d.get("id") or d.get("uid") or "")
+except Exception:
+    print("")' 2>/dev/null
+}
+if [ -z "${SMOKE_BASE:-}" ] && [ -n "$DEPLOY_URL" ] && printf '%s' "$VERIFY_TARGET" | grep -qvE '\-projects\.vercel\.app$'; then
+  echo ""
+  DEPLOY_DPL="$(resolve_dpl "$DEPLOY_URL")"
+  # Pass the dpl_ id (not the URL) as verify-alias's first arg when we have it:
+  # verify-alias accepts a dpl_ ref directly and skips re-inspecting the deploy URL,
+  # so the id is resolved exactly once and shared by the local check and the payload.
+  ./scripts/verify-alias.sh "${DEPLOY_DPL:-$DEPLOY_URL}" "$VERIFY_TARGET"
+  VA_RC=$?
+  if [ "$VA_RC" -eq 1 ]; then
+    red "✗ Aborting: the alias does not serve the build we just deployed."
+    red "  Smoking it would validate a stale deployment. Fix the alias and re-run."
+    exit 1
+  elif [ "$VA_RC" -ne 0 ]; then
+    red "  (verify-alias prereq unavailable — continuing; smoke gate still runs against $BASE)"
+  fi
+fi
+
 # Notify GitHub Actions that prod was deployed. Vercel deploys here via CLI (no
 # GitHub app), so it never emits a deployment_status — this repository_dispatch is
 # the signal that re-runs .github/workflows/smoke-prod.yml's LIVE smoke gate on a
@@ -65,6 +104,7 @@ notify_ci() {
        -f event_type=prod-deployed \
        -f "client_payload[url]=$1" \
        -f "client_payload[deploy_id]=$deploy_id" \
+       -f "client_payload[deploy_dpl]=${DEPLOY_DPL:-}" \
        -f "client_payload[source]=deploy.sh" >/dev/null 2>&1; then
     green "  ✓ Notified GitHub Actions (repository_dispatch: prod-deployed → $1)"
     green "    deploy_id=$deploy_id  (find the run: gh run list --workflow=smoke-prod-live.yml)"
