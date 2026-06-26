@@ -53,3 +53,12 @@ jobs:
       # systemic path-filter gap that forced the admin bypasses above.
       - name: Run trigger-topology guard (lock fixture-check triggers)
         run: bash scripts/check-trigger-topology.sh ../.github/workflows/fixture-check.yml
+
+      # Saga self-test: prove the durable cron-proof SINK writes its record block
+      # ONLY on a genuine exit-0 (N-job unattended proof), forwards capture's exit
+      # code verbatim, and is idempotent. The harness stubs capture-cron-proof.sh,
+      # so it's fully offline (pure bash — no jq/gh/network) and belongs on this
+      # deps-light fixture job rather than the jq-bound audit suite. Locks the sink
+      # logic in CI so a future edit can't silently start writing a false WIN.
+      - name: Self-test the cron-proof record sink offline (all exit paths)
+        run: bash scripts/record-cron-proof.selftest.sh
