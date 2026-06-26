@@ -45,6 +45,8 @@ fi
 #   $TMP/runlist.json  -> served for `gh run list ...`
 #   $TMP/jobs.json     -> served for `gh run view ... --json jobs`
 #   $TMP/runlist.rc    -> optional exit code for `run list` (default 0)
+#   $TMP/wf_runsha.yml -> served for `gh api ...contents...?ref=$FAKE_RUNSHA`
+#   $TMP/wf_main.yml   -> served for `gh api ...contents...?ref=<anything else>`
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'GHEOF'
 #!/usr/bin/env bash
@@ -59,17 +61,44 @@ case "$1 $2" in
     cat "$FAKE_DIR/jobs.json" 2>/dev/null
     exit 0
     ;;
+  "api "*)
+    # job_defined_at fetches the workflow body at a git ref; serve the canned
+    # body for the run's head SHA vs. any other ref (i.e. main). The ref rides in
+    # the last argument (the contents path) as ?ref=<sha>.
+    _last="${@: -1}"
+    if [[ "$_last" == *"ref=$FAKE_RUNSHA"* ]]; then
+      cat "$FAKE_DIR/wf_runsha.yml" 2>/dev/null
+    else
+      cat "$FAKE_DIR/wf_main.yml" 2>/dev/null
+    fi
+    exit 0
+    ;;
   *) echo "stub gh: unhandled '$*'" >&2; exit 99 ;;
 esac
 GHEOF
 chmod +x "$TMP/bin/gh"
 export FAKE_DIR="$TMP"
+export FAKE_RUNSHA="RUNSHA777"
+
+# The five jobs branch-protection-audit.yml defines, and a helper that renders a
+# minimal workflow body containing a chosen subset — used to simulate the
+# workflow as it stood at the run's head SHA vs. on main now.
+ALL5="audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology"
+wf_body() { # wf_body "<space-separated job ids>"
+  printf 'name: branch-protection-audit\njobs:\n'
+  for j in $1; do printf '  %s:\n    runs-on: ubuntu-latest\n' "$j"; done
+}
 
 # Run the target with the stubbed PATH and a chosen scenario, capture exit code.
-run_case() { # run_case "runlist.json contents" "jobs.json contents" [runlist.rc] [extra env...]
+# WF_RUNSHA_JOBS / WF_MAIN_JOBS (default: all five) control the workflow body the
+# stub serves for the run's head SHA and for main respectively — this is how the
+# added-after-run (benign) case is distinguished from skipped/removed (regression).
+run_case() { # run_case "runlist.json contents" "jobs.json contents" [runlist.rc]
   printf '%s' "$1" > "$TMP/runlist.json"
   printf '%s' "$2" > "$TMP/jobs.json"
   printf '%s' "${3:-0}" > "$TMP/runlist.rc"
+  wf_body "${WF_RUNSHA_JOBS:-$ALL5}" > "$TMP/wf_runsha.yml"
+  wf_body "${WF_MAIN_JOBS:-$ALL5}" > "$TMP/wf_main.yml"
   PATH="$TMP/bin:$PATH" REPO=fake/repo "$TARGET" >/dev/null 2>&1
   echo $?
 }
@@ -85,8 +114,8 @@ FRESH="$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 STALE="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
         || date -j -u -v-3d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
 
-run_obj() { # run_obj <status> <conclusion> <createdAt>
-  printf '[{"databaseId":777,"status":"%s","conclusion":"%s","createdAt":"%s","headBranch":"main","url":"https://x/777"}]' "$1" "$2" "$3"
+run_obj() { # run_obj <status> <conclusion> <createdAt> [headSha]
+  printf '[{"databaseId":777,"status":"%s","conclusion":"%s","createdAt":"%s","headBranch":"main","headSha":"%s","url":"https://x/777"}]' "$1" "$2" "$3" "${4:-RUNSHA777}"
 }
 jobs_obj() { # jobs_obj <bp> <mg> <st> <pa> <rt>  (empty string omits that job)
   # Mirrors the FIVE jobs branch-protection-audit.yml defines, matching the
@@ -118,9 +147,10 @@ expect "schedule run concluded 'failure' -> REGRESSION"          "$EX" 1
 EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj failure success success success success)")"
 expect "overall success but audit-branch-protection red -> FAIL" "$EX" 1
 
-# 4) A required job silently renamed/removed (not in jobs list) -> fail (1).
+# 4) A required job absent from the run while it DID exist at the run's head SHA
+#    (default wf_runsha contains all five) -> skipped/not enforced -> fail (1).
 EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj '' success success success success)")"
-expect "required job missing from run -> FAIL"                    "$EX" 1
+expect "job absent from run but present at run SHA -> FAIL"       "$EX" 1
 
 # 4b) The 3rd job (selftest-schedule-verifier) silently SKIPPED while overall is
 #     still 'success' (skipped jobs don't flip a run to failure) -> must fail (1).
@@ -142,6 +172,26 @@ expect "audit-proof-armed skipped, overall green -> FAIL"        "$EX" 1
 #     skipped it would pass blind. This case proves the 5-job coupling has teeth.
 EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '')")"
 expect "audit-required-checks-topology skipped, overall green -> FAIL" "$EX" 1
+
+# 4e) The false-fail fix: a job ADDED to the workflow AFTER an older schedule run
+#     fired — absent from the run AND absent at the run's head SHA, but present on
+#     main now -> the job simply has not been through an unattended tick yet ->
+#     PENDING (2), NOT a regression. Without the head-SHA timing check this case is
+#     indistinguishable from 4d and would false-FAIL for the one tick between
+#     landing a new audit job and its first scheduled run. This is THE fix.
+EX="$(WF_RUNSHA_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
+      WF_MAIN_JOBS="$ALL5" \
+      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '')")"
+expect "5th job added after run fired (on main, not at run SHA) -> PENDING" "$EX" 2
+
+# 4f) Genuine removal everywhere — absent from the run, from the run's head SHA,
+#     AND from main -> the JOBS list expects a job that exists nowhere -> FAIL (1).
+#     This proves the not-at-run-SHA branch still surfaces real drift, so 4e's
+#     benign exit-2 isn't a blanket "missing job is always fine" regression.
+EX="$(WF_RUNSHA_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
+      WF_MAIN_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
+      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '')")"
+expect "5th job removed from run, run SHA, and main -> FAIL"      "$EX" 1
 
 # 5) No schedule run yet (empty array) -> PENDING, inconclusive (2).
 EX="$(run_case "[]" "$(jobs_obj success success success success success)")"

@@ -32,10 +32,22 @@
 #                      unattended path is caught even when overall conclusion is
 #                      'success', which skipped jobs do not flip to failure)
 # Exit:    0 = a recent unattended schedule run finished green, all jobs green
-#          1 = a schedule run fired but FAILED (or a required job is red/missing)
-#              — this is the regression the cron audit exists to surface
-#          2 = inconclusive: no schedule run yet, last one too old, or gh
-#              missing/unauth/API unreachable. A blip must never read as exit 1.
+#          1 = a schedule run fired but FAILED (or a required job is red/missing
+#              despite having existed when the run fired) — the regression the
+#              cron audit exists to surface
+#          2 = inconclusive: no schedule run yet, last one too old, gh
+#              missing/unauth/API unreachable, OR an expected job was ADDED to the
+#              workflow after the newest schedule run fired and has not yet been
+#              through an unattended tick (benign — re-run after the next tick).
+#              A blip — or a not-yet-ticked new job — must never read as exit 1.
+#
+# Added-job vs removed-job (the subtle case): a job in JOBS that is absent from
+# the run is FAIL only if it ALSO existed in the workflow at the run's own head
+# SHA (so it was skipped/dropped on the unattended path). If it was absent at the
+# run SHA but is present on $BRANCH now, it was simply added after this run fired
+# — inconclusive (exit 2), not a regression. This timing check is what keeps the
+# guard from false-failing for the one tick between landing a new audit job and
+# its first scheduled run.
 
 set -uo pipefail
 
@@ -50,6 +62,23 @@ green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 yellow(){ printf '\033[33m%s\033[0m\n' "$1"; }
 bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
+
+# Is job id $2 defined in the workflow file at git ref $1?  Prints yes|no|unknown.
+# Used to tell a job that was SKIPPED/dropped on a run where it DID exist (FAIL)
+# from one ADDED to the workflow after an older schedule run fired (benign).
+# Raw Accept header returns the file body directly — no base64 (portable to the
+# macOS bash 3.2 that runs the self-test; no associative arrays anywhere here).
+job_defined_at() {
+  local ref="$1" job="$2" body
+  body="$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPO/contents/.github/workflows/$WORKFLOW?ref=$ref" 2>/dev/null)"
+  [ -z "$body" ] && { echo unknown; return; }
+  if printf '%s\n' "$body" | grep -qE "^[[:space:]]+${job}:[[:space:]]*$"; then
+    echo yes
+  else
+    echo no
+  fi
+}
 
 bold "== check-schedule-fired :: did $WORKFLOW fire on cron (unattended) on $BRANCH and finish green? =="
 echo ""
@@ -72,7 +101,7 @@ fi
 # event=schedule isolates the unattended path; manual dispatch/push are excluded
 # precisely because they are the thing we DON'T trust to prove the cron.
 RUN_JSON="$(gh run list --repo "$REPO" --workflow "$WORKFLOW" --event schedule --branch "$BRANCH" \
-              --limit 1 --json databaseId,status,conclusion,createdAt,headBranch,url 2>/tmp/csf-err.$$)"
+              --limit 1 --json databaseId,status,conclusion,createdAt,headBranch,headSha,url 2>/tmp/csf-err.$$)"
 RC=$?
 if [ $RC -ne 0 ] || [ -z "$RUN_JSON" ]; then
   yellow "  SKIP  could not list runs (gh exit $RC):"
@@ -95,6 +124,7 @@ RUN_ID="$(printf '%s' "$RUN_JSON" | jq -r '.[0].databaseId')"
 STATUS="$(printf '%s' "$RUN_JSON" | jq -r '.[0].status')"
 CONCL="$(printf '%s' "$RUN_JSON" | jq -r '.[0].conclusion')"
 CREATED="$(printf '%s' "$RUN_JSON" | jq -r '.[0].createdAt')"
+HEAD_SHA="$(printf '%s' "$RUN_JSON" | jq -r '.[0].headSha')"
 URL="$(printf '%s' "$RUN_JSON" | jq -r '.[0].url')"
 
 echo "  run     #$RUN_ID  ($STATUS/${CONCL:-—})"
@@ -155,12 +185,27 @@ rm -f /tmp/csf-jerr.$$
 
 MISSING=0
 RED=0
+ADDED_AFTER=0
 for J in "${JOBS[@]}"; do
   [ -z "$J" ] && continue
   JC="$(printf '%s' "$JOBS_JSON" | jq -r --arg n "$J" '.jobs[] | select(.name==$n) | .conclusion' | head -1)"
   if [ -z "$JC" ]; then
-    red "  job '$J' : NOT FOUND in run #$RUN_ID — renamed/removed and no longer enforced?"
-    MISSING=$((MISSING+1))
+    # Absent from the run. Classify by TIMING, not by mere absence: a job that
+    # existed at the run's head SHA but didn't appear was skipped/dropped (FAIL);
+    # one absent at the run SHA but present on $BRANCH was added after this run
+    # fired and is simply awaiting its first scheduled tick (benign, exit 2).
+    AT_RUN="$(job_defined_at "$HEAD_SHA" "$J")"
+    AT_MAIN="$(job_defined_at "$BRANCH" "$J")"
+    if [ "$AT_RUN" = "no" ] && [ "$AT_MAIN" = "yes" ]; then
+      yellow "  job '$J' : added to $WORKFLOW after run #$RUN_ID fired (on $BRANCH, not at its head SHA) — awaiting its first schedule tick."
+      ADDED_AFTER=$((ADDED_AFTER+1))
+    elif [ "$AT_RUN" = "yes" ]; then
+      red "  job '$J' : defined at the run's head SHA but ABSENT from run #$RUN_ID — skipped / not enforced on the unattended path?"
+      MISSING=$((MISSING+1))
+    else
+      red "  job '$J' : NOT FOUND in run #$RUN_ID (run-SHA:$AT_RUN $BRANCH:$AT_MAIN) — renamed/removed and no longer enforced?"
+      MISSING=$((MISSING+1))
+    fi
   elif [ "$JC" != "success" ]; then
     red "  job '$J' : $JC"
     RED=$((RED+1))
@@ -173,6 +218,14 @@ echo ""
 if [ "$RED" -gt 0 ] || [ "$MISSING" -gt 0 ]; then
   red "  FAIL  the cron fired but $((RED+MISSING)) required job(s) were red/missing. $URL"
   exit 1
+fi
+
+if [ "$ADDED_AFTER" -gt 0 ]; then
+  yellow "  PENDING  the cron fired green, but $ADDED_AFTER expected job(s) were added to $WORKFLOW"
+  echo   "           after the newest schedule run (#$RUN_ID) fired — they have not yet been through"
+  echo   "           an unattended tick. Not a regression: re-run after the next 13:17 UTC tick to"
+  echo   "           capture the full ${#JOBS[@]}-job exit-0 proof. $URL"
+  exit 2
 fi
 
 green "  PASS  $WORKFLOW fired UNATTENDED on $BRANCH (#$RUN_ID) and every required job is green."
