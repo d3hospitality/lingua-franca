@@ -9,8 +9,13 @@
 #
 # Cost note: [2] and [3] make real paid GPT + Whisper/Deepgram calls against prod
 # (a few cents/run). It runs once per production deploy + a daily canary, not per push.
-# Re-parse bump 2026-06-26: push to force GitHub to re-index the repository_dispatch
-# trigger so `prod-deployed` events start matching (see deploy.sh dispatch hook).
+# Registration note 2026-06-26: this workflow was originally created (commit 5679cc5)
+# as a dispatch-only file with NO push trigger, which poisoned its trigger index on
+# GitHub — `repository_dispatch`/`workflow_dispatch` events returned 422 "workflow
+# does not have trigger" even after later adding a scoped push gate. Renaming the file
+# (smoke-prod.yml -> smoke-prod-live.yml) forces a brand-new workflow registration that
+# has the push trigger present FROM CREATION, so all triggers index cleanly. Dispatch
+# matches by event_type across any filename, so deploy.sh's prod-deployed hook is unaffected.
 name: smoke-prod
 
 on:
@@ -30,7 +35,7 @@ on:
   # paid run only fires on the rare occasion the smoke definition is edited.
   push:
     paths:
-      - '.github/workflows/smoke-prod.yml'
+      - '.github/workflows/smoke-prod-live.yml'
   # Kept for the day this project is linked to the Vercel GitHub app — then real
   # deployment_status events flow and the success/Production guard below applies.
   deployment_status:
