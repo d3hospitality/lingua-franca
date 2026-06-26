@@ -1,0 +1,33 @@
+# Runs the lingua-franca-api offline fixture integrity check on real Ubuntu Linux
+# every push/PR — gates that the committed long-en.b64 decodes via GNU `base64 -d`
+# and that the awk + python3 deps the check uses resolve on a glibc box. This is
+# the CI-portable half of the smoke gate; the live transcribe round-trip ([3])
+# still needs a deploy and runs from scripts/smoke-test.sh post-deploy.
+name: fixture-check
+
+on:
+  push:
+    paths:
+      - 'lingua-franca-api/scripts/**'
+      - '.github/workflows/fixture-check.yml'
+  pull_request:
+    paths:
+      - 'lingua-franca-api/scripts/**'
+  workflow_dispatch:
+
+jobs:
+  check-fixture:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-latest already ships bash, coreutils (base64 -d), mawk and python3;
+      # assert they're present so a missing dep fails loudly rather than skipping.
+      - name: Verify offline-check deps resolve on Linux
+        run: command -v bash && command -v base64 && command -v awk && command -v python3
+
+      - name: Run smoke-test.sh --check-fixture (offline, Linux)
+        run: bash scripts/smoke-test.sh --check-fixture

@@ -4,6 +4,7 @@
 # long Whisper/Deepgram transcriptions. Run after every `vercel --prod` deploy.
 #
 # Usage:   ./scripts/smoke-test.sh [base-url]
+#          ./scripts/smoke-test.sh --check-fixture   # offline: validate long-en.b64 only
 # Default base-url: https://lingua-franca-api.vercel.app
 # Requires: curl, python3. The [3] transcribe check uses macOS `say`+`afconvert`
 #           when present, else falls back to the committed scripts/fixtures/long-en.b64
@@ -12,7 +13,9 @@
 
 set -uo pipefail
 
-BASE="${1:-https://lingua-franca-api.vercel.app}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FIXTURE="$SCRIPT_DIR/fixtures/long-en.b64"
+PASSAGE_FILE="$SCRIPT_DIR/fixtures/long-en.txt"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
@@ -25,6 +28,58 @@ check() { # check "label" actual expected
   if [ "$2" = "$3" ]; then green "  PASS  $1 ($2)"; PASS=$((PASS+1));
   else red "  FAIL  $1 (got $2, want $3)"; FAIL=$((FAIL+1)); fi
 }
+
+# Single source of truth for the spoken passage (kept in sync with the b64 fixture
+# by gen-fixture.sh). Falls back to an inline copy only if the file is missing.
+read_passage() {
+  if [ -f "$PASSAGE_FILE" ]; then cat "$PASSAGE_FILE"; else
+    printf '%s' "In recent years the hospitality industry has changed in ways nobody expected. Restaurants now rely on technology for reservations, ordering, and even pairing wine with food. When I first started cooking professionally in Lisbon, everything was done by hand and from memory. Today a young chef carries a tablet, checks inventory in real time, and adjusts the menu based on what sells. But the heart of the work has not changed at all. You still need to taste constantly, respect your ingredients, and cook for the person sitting at the table, not for a camera. That is something no machine will ever replace, no matter how advanced the kitchen becomes over the next decade."
+  fi
+}
+
+# Decode the committed b64 fixture to raw PCM at $1 (Linux `base64 -d`, macOS `-D -i`).
+decode_fixture() {
+  tr -d '\n' < "$FIXTURE" > "$TMP/a.b64"
+  base64 -d "$TMP/a.b64" > "$1" 2>/dev/null || base64 -D -i "$TMP/a.b64" > "$1"
+}
+
+# Offline fixture integrity check — no network, no macOS. Proves the committed
+# fixture decodes to a sane ~38.8s 16kHz mono PCM so the [3] truncation guard is
+# trustworthy in Linux CI. `smoke-test.sh --check-fixture` runs only this.
+check_fixture() {
+  echo "== fixture integrity check (offline) =="
+  local rc=0
+  if [ ! -f "$FIXTURE" ]; then red "  FAIL  no fixture at $FIXTURE"; return 1; fi
+  decode_fixture "$TMP/a.pcm"
+  local bytes dur words
+  bytes=$(wc -c < "$TMP/a.pcm" | tr -d ' ')
+  dur=$(awk "BEGIN{printf \"%.1f\", $bytes/32000}")
+  words=$(read_passage | wc -w | tr -d ' ')
+  echo "  decoded: $bytes PCM bytes -> ~${dur}s @16kHz mono 16-bit; passage = $words words"
+  # 16kHz mono PCM => 32000 B/s. Expect 30–50s of real speech; flag empty/garbage.
+  if [ "$bytes" -lt 960000 ] || [ "$bytes" -gt 1600000 ]; then
+    red "  FAIL  decoded duration ${dur}s out of expected 30–50s range — fixture corrupt or wrong format"; rc=1
+  else
+    green "  PASS  fixture decodes to ${dur}s of PCM (expected range)"
+  fi
+  # Confirm it is real audio, not silence (catches a zero-filled or truncated b64).
+  local peak
+  peak=$(python3 - "$TMP/a.pcm" <<'PY' 2>/dev/null || echo 0
+import sys,array
+d=open(sys.argv[1],'rb').read()
+a=array.array('h'); a.frombytes(d[:len(d)//2*2])
+print(max((abs(v) for v in a), default=0))
+PY
+)
+  if [ "$peak" -ge 1000 ]; then green "  PASS  contains real audio (peak amplitude $peak/32768)";
+  else red "  FAIL  fixture is silent/empty (peak $peak) — regenerate with gen-fixture.sh"; rc=1; fi
+  [ "$rc" -eq 0 ] && green "== fixture OK ==" || red "== fixture BAD =="
+  return $rc
+}
+
+if [ "${1:-}" = "--check-fixture" ]; then check_fixture; exit $?; fi
+
+BASE="${1:-https://lingua-franca-api.vercel.app}"
 
 echo "== lingua-franca-api smoke test =="
 echo "Target: $BASE"
@@ -58,9 +113,8 @@ echo ""
 # passage rendered to raw 16kHz mono PCM — regenerate it with scripts/gen-fixture.sh
 # if you ever change $LONG below, or WORDS_SPOKEN will drift from the audio.
 echo "[3] /api/transcribe (long-audio truncation guard)"
-LONG="In recent years the hospitality industry has changed in ways nobody expected. Restaurants now rely on technology for reservations, ordering, and even pairing wine with food. When I first started cooking professionally in Lisbon, everything was done by hand and from memory. Today a young chef carries a tablet, checks inventory in real time, and adjusts the menu based on what sells. But the heart of the work has not changed at all. You still need to taste constantly, respect your ingredients, and cook for the person sitting at the table, not for a camera. That is something no machine will ever replace, no matter how advanced the kitchen becomes over the next decade."
+LONG="$(read_passage)"
 WORDS_SPOKEN=$(printf '%s' "$LONG" | wc -w | tr -d ' ')
-FIXTURE="$(cd "$(dirname "$0")" && pwd)/fixtures/long-en.b64"
 AUDIO_SRC=""
 if command -v say >/dev/null && command -v afconvert >/dev/null; then
   say -o "$TMP/a.aiff" "$LONG"
@@ -69,8 +123,7 @@ if command -v say >/dev/null && command -v afconvert >/dev/null; then
   base64 -i "$TMP/a.pcm" | tr -d '\n' > "$TMP/a.b64"
   AUDIO_SRC="say/afconvert (live)"
 elif [ -f "$FIXTURE" ]; then
-  tr -d '\n' < "$FIXTURE" > "$TMP/a.b64"
-  base64 -d "$TMP/a.b64" > "$TMP/a.pcm" 2>/dev/null || base64 -D -i "$TMP/a.b64" > "$TMP/a.pcm"
+  decode_fixture "$TMP/a.pcm"
   AUDIO_SRC="committed fixture"
 fi
 if [ -z "$AUDIO_SRC" ]; then

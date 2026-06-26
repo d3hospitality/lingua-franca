@@ -9,14 +9,20 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="$DIR/fixtures/long-en.b64"
+PASSAGE_FILE="$DIR/fixtures/long-en.txt"
 
 if ! command -v say >/dev/null || ! command -v afconvert >/dev/null; then
   echo "error: needs macOS 'say' and 'afconvert' to render the fixture" >&2
   exit 1
 fi
 
-# Keep this passage identical to $LONG in smoke-test.sh.
-LONG="In recent years the hospitality industry has changed in ways nobody expected. Restaurants now rely on technology for reservations, ordering, and even pairing wine with food. When I first started cooking professionally in Lisbon, everything was done by hand and from memory. Today a young chef carries a tablet, checks inventory in real time, and adjusts the menu based on what sells. But the heart of the work has not changed at all. You still need to taste constantly, respect your ingredients, and cook for the person sitting at the table, not for a camera. That is something no machine will ever replace, no matter how advanced the kitchen becomes over the next decade."
+# Single source of truth for the spoken passage — smoke-test.sh reads the same file.
+# Edit fixtures/long-en.txt (not a copy here) and re-run this to keep them in sync.
+if [ ! -f "$PASSAGE_FILE" ]; then
+  echo "error: missing passage file $PASSAGE_FILE" >&2
+  exit 1
+fi
+LONG="$(cat "$PASSAGE_FILE")"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
