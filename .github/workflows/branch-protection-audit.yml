@@ -29,6 +29,7 @@ on:
       - main
     paths:
       - 'lingua-franca-api/scripts/check-branch-protection.sh'
+      - 'lingua-franca-api/scripts/check-required-checks-topology.sh'
       - 'lingua-franca-api/scripts/check-merge-gate.sh'
       - 'lingua-franca-api/scripts/check-merge-gate-all.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.sh'
@@ -58,6 +59,42 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=branch-protection-audit::Inconclusive (exit 2) — likely BRANCH_PROTECTION_PAT secret is unset or lacks admin:repo read. Gate NOT verified."
+            exit 0
+          fi
+          exit $rc
+
+  # SELF-EXTENDING TOPOLOGY GUARD: audit-branch-protection (above) proves the
+  # required contexts are LISTED; this proves each one's WORKFLOW is trigger-clean
+  # AND that strict mode is on. The per-workflow topology step embedded in
+  # alias-guard-check.yml / fixture-check.yml only locks the TWO workflows that
+  # carry it — nothing forces a FUTURE 3rd required check to self-lock. This job
+  # derives the work-list from the LIVE required contexts and runs the topology
+  # guard against EACH, so a new required check whose workflow is path-filtered on
+  # pull_request (the exact hang that forced #14/#17 admin bypasses) is caught
+  # within 24h instead of when an unrelated PR first hangs. Also asserts strict=true
+  # so a silent flip back to non-strict (stale-base merges) is surfaced. Needs the
+  # same admin read as audit-branch-protection → BRANCH_PROTECTION_PAT.
+  audit-required-checks-topology:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v5
+
+      # exit 0 = strict on + every required check topology-clean (pass) ·
+      # exit 1 = strict off, a required context maps to no workflow, or a required
+      #          check's workflow is path-filtered/double-running (FAIL — a real hole) ·
+      # exit 2 = inconclusive, e.g. PAT absent or API blip (neutral warning, don't page).
+      - name: Assert every required check is topology-clean and strict mode is on
+        env:
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_PAT }}
+        run: |
+          set +e
+          bash scripts/check-required-checks-topology.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=audit-required-checks-topology::Inconclusive (exit 2) — likely BRANCH_PROTECTION_PAT secret is unset or lacks admin:repo read. Topology+strict NOT verified."
             exit 0
           fi
           exit $rc
