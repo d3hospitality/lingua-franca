@@ -48,29 +48,40 @@ EOF
 #!/usr/bin/env bash
 printf 'B' >> "$STUB_ORDER"; exit "${STUB_B:-0}"
 EOF
+  # record stub: logs 'C', and on exit 0 ALSO writes a fixture WIN block to
+  # $RECORD_FILE — mirroring the real durable wrapper — UNLESS STUB_C_NOWRITE=1,
+  # which simulates record's silent no-write path (capture exit 0 but block lost).
   cat > "$work/record-cron-proof.sh"            <<'EOF'
 #!/usr/bin/env bash
-printf 'C' >> "$STUB_ORDER"; exit "${STUB_C:-0}"
+printf 'C' >> "$STUB_ORDER"
+code="${STUB_C:-0}"
+if [ "$code" -eq 0 ] && [ "${STUB_C_NOWRITE:-0}" -ne 1 ]; then
+  printf 'UNATTENDED 5-JOB EXIT-0 PROOF CAPTURED: (fixture)\n' >> "$RECORD_FILE"
+fi
+exit "$code"
 EOF
   chmod +x "$work"/*.sh
   printf '%s' "$work"
 }
 
-# run_case A B C → echoes "<exit> <order>" from a fresh sandbox of the REAL orch.
+# run_case A B C [NOWRITE] → echoes "<exit> <order>" from a fresh sandbox of the
+# REAL orch. RECORD_FILE points inside the sandbox so gate C's durability check
+# reads the fixture the record stub writes. NOWRITE=1 suppresses that write.
 run_case() {
   local work; work="$(make_sandbox "$ORCH_REAL")"
   local order="$work/order.log"; : > "$order"
-  STUB_A="$1" STUB_B="$2" STUB_C="$3" STUB_ORDER="$order" \
+  STUB_A="$1" STUB_B="$2" STUB_C="$3" STUB_C_NOWRITE="${4:-0}" \
+    STUB_ORDER="$order" RECORD_FILE="$work/CRON-PROOF-CAPTURED.md" \
     "$work/close-cron-proof-mission.sh" >/dev/null 2>&1
   local ec=$?
   printf '%s %s' "$ec" "$(cat "$order")"
   rm -rf "$work"
 }
 
-# assert label  A B C  → expected_exit expected_order
+# assert label  A B C  → expected_exit expected_order   [NOWRITE]
 assert() {
   local label="$1" got want_exit want_order
-  got="$(run_case "$2" "$3" "$4")"
+  got="$(run_case "$2" "$3" "$4" "${7:-0}")"
   want_exit="$5"; want_order="$6"
   local ge="${got%% *}" go="${got##* }"
   if [ "$ge" = "$want_exit" ] && [ "$go" = "$want_order" ]; then
@@ -100,6 +111,13 @@ assert "C=1 regression      → BLOCKED"        0 0 1  1 "ABC"
 assert "C=3 odd nonzero     → BLOCKED (default arm)" 0 0 3  1 "ABC"
 echo ""
 
+bold "[3b] Durability gate — record exit 0 but NO win block on disk MUST NOT close"
+# Simulates record-cron-proof.sh's silent no-write path / a failed append: capture
+# exits 0 yet CRON-PROOF-CAPTURED.md never gets the block. The mission requires the
+# proof be durable, so the orchestrator must BLOCK, not declare a false victory.
+assert "C=0 but file empty  → BLOCKED (no durable proof)" 0 0 0  1 "ABC"  1
+echo ""
+
 bold "[4] Gate A 'already captured' passthrough — A=0 continues to B/C"
 # (A's case{} only special-cases 1 & 2; any other A code falls through to ARMED)
 assert "A=3 odd → treated as armed, reaches C=0 WIN" 3 0 0  0 "ABC"
@@ -114,7 +132,9 @@ MUT="$(make_sandbox "$ORCH_REAL")"
 # Target the unique line: the green MISSION CLOSED arm ends in 'exit 0 ;;'.
 if perl -0pi -e 's/(MISSION CLOSED.*?)exit 0 ;;/${1}exit 2 ;;/s' "$MUT/close-cron-proof-mission.sh"; then
   morder="$MUT/order.log"; : > "$morder"
-  STUB_A=0 STUB_B=0 STUB_C=0 STUB_ORDER="$morder" \
+  # RECORD_FILE set + stub writes the block so the durability gate PASSES — isolating
+  # the win-path mapping mutation as the sole cause of a non-zero exit.
+  STUB_A=0 STUB_B=0 STUB_C=0 STUB_ORDER="$morder" RECORD_FILE="$MUT/CRON-PROOF-CAPTURED.md" \
     "$MUT/close-cron-proof-mission.sh" >/dev/null 2>&1
   mec=$?
   if [ "$mec" -ne 0 ]; then
