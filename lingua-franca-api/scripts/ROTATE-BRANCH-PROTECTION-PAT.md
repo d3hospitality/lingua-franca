@@ -47,6 +47,17 @@ You click **Generate**, copy, and paste; the wizard does the rest and rolls back
 guidance if anything fails. Prefer the manual steps below if you want to inspect
 each stage by hand.
 
+Before it opens the mint page, the wizard runs the **pre-mint readiness gate**,
+which proves every prerequisite *except* the human mint is green (you're an admin,
+the current credential reads protection so rollback is live, the audit workflow
+exists, every chained script is present) — so a perishable fine-grained token is
+never minted-then-wasted on a missing precondition. Run it standalone any time:
+
+```bash
+cd lingua-franca-api
+./scripts/preflight-mint-readiness.sh   # exit 0 = READY to mint; 1 = fix first; 2 = gh missing/unauth
+```
+
 ---
 
 ## 1 — Mint the fine-grained PAT (GitHub UI, ~2 min)

@@ -14,10 +14,16 @@
 # the rotation by reading the audit LOG, not just its conclusion — so a neutered
 # token can never masquerade as a green run. Nothing is stored on any failure.
 #
+# Before sending you to the web UI it runs preflight-mint-readiness.sh, which
+# proves every prerequisite but the human mint is green (admin, readable
+# protection, audit workflow, chained scripts) — so an irreducible fine-grained
+# token is never minted-then-wasted on a missing precondition.
+#
 # Usage:
-#   ./scripts/mint-branch-protection-pat.sh             # full guided flow (open page, paste, store, confirm)
-#   ./scripts/mint-branch-protection-pat.sh --no-open   # don't launch a browser; just print the URL
-#   ./scripts/mint-branch-protection-pat.sh --no-confirm# store but skip the step-4 audit dispatch
+#   ./scripts/mint-branch-protection-pat.sh                # full guided flow (readiness, open page, paste, store, confirm)
+#   ./scripts/mint-branch-protection-pat.sh --no-open      # don't launch a browser; just print the URL
+#   ./scripts/mint-branch-protection-pat.sh --no-confirm   # store but skip the step-4 audit dispatch
+#   ./scripts/mint-branch-protection-pat.sh --skip-readiness # bypass the pre-mint readiness gate
 #
 # Env:  REPO   (default d3hospitality/lingua-franca)
 #       OWNER  (default d3hospitality — the resource owner the PAT must be scoped to)
@@ -42,11 +48,13 @@ dim()   { printf '\033[2m%s\033[0m\n' "$1"; }
 
 NO_OPEN=0
 NO_CONFIRM=0
+SKIP_READINESS=0
 for arg in "$@"; do
   case "$arg" in
-    --no-open)    NO_OPEN=1 ;;
-    --no-confirm) NO_CONFIRM=1 ;;
-    -h|--help)    grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-open)        NO_OPEN=1 ;;
+    --no-confirm)     NO_CONFIRM=1 ;;
+    --skip-readiness) SKIP_READINESS=1 ;;
+    -h|--help)        grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) red "  unknown arg: $arg (try --help)"; exit 2 ;;
   esac
 done
@@ -54,6 +62,20 @@ done
 if ! command -v gh >/dev/null 2>&1; then
   yellow "  SKIP  gh CLI not found — install https://cli.github.com then re-run"
   exit 2
+fi
+
+# ── Pre-mint readiness: prove everything but the human mint is green BEFORE we ─
+# send the operator to the web UI, so an irreducible fine-grained token can never
+# be minted-then-wasted on a missing prerequisite. (--skip-readiness to bypass.)
+if [ "$SKIP_READINESS" -eq 0 ] && [ -x "$DIR/preflight-mint-readiness.sh" ]; then
+  if ! REPO="$REPO" OWNER="$OWNER" "$DIR/preflight-mint-readiness.sh"; then
+    rc=$?
+    echo ""
+    red "  Not minting: pre-mint readiness gate exited $rc — fix the above first so your"
+    red "  one web-UI mint isn't wasted. Bypass with --skip-readiness if you know better."
+    exit "$rc"
+  fi
+  echo ""
 fi
 
 bold "== mint-branch-protection-pat :: guided least-privilege rotation for $REPO =="
