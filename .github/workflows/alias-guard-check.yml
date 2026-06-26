@@ -34,6 +34,9 @@ jobs:
         run: command -v bash && command -v grep
 
       # The guard exits non-zero if the alias↔build step can no longer fail loudly
-      # on a lapsed VERCEL_TOKEN — i.e. if the loud-fail branch was reverted.
+      # on a lapsed VERCEL_TOKEN — i.e. if the loud-fail branch was reverted. As of
+      # 2026-06-26 the guard's dynamic layer [2] extracts and sources the real step
+      # body from smoke-prod-live.yml (no longer a hand-mirrored copy), so a stealth
+      # exit 1→exit 0 flip that keeps the ::error:: string is now caught here too.
       - name: Run alias↔build loud-fail guard
         run: bash scripts/check-alias-guard.sh
