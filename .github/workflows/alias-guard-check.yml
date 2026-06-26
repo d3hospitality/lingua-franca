@@ -34,7 +34,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ubuntu-latest ships bash + GNU grep; assert they resolve so a missing dep
       # fails loudly rather than the guard skipping silently.

@@ -44,7 +44,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # exit 0 = gate live (pass) · exit 1 = context dropped (FAIL the job) ·
       # exit 2 = inconclusive, e.g. PAT secret absent (neutral warning, don't fail
@@ -74,7 +74,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # exit 0 = every open PR's gate is consistent (or no open PRs) ·
       # exit 1 = a DEAD/defective gate on some PR (FAIL the job — investigate now) ·
@@ -107,7 +107,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # exit 0 = all 8 stubbed exit-path scenarios behave as specified ·
       # exit 1 = check-schedule-fired.sh's exit logic drifted (FAIL — a regression) ·
@@ -143,7 +143,7 @@ jobs:
       run:
         working-directory: lingua-franca-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # exit 0 = apparatus armed (pass) · exit 1 = mis-wired, a real regression that
       # would waste/false the next proof (FAIL the job) · exit 2 = inconclusive
