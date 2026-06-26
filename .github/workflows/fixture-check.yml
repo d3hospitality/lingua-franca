@@ -7,12 +7,26 @@ name: fixture-check
 
 on:
   push:
+    # Scoped to the default branch ONLY — mirrors alias-guard-check.yml. The
+    # pull_request trigger below already runs on every PR (it's the required
+    # gate), so a push trigger on PR feature branches just duplicates that run.
+    # Restricting push to main keeps the one case pull_request can't see — a
+    # direct-to-main commit (admin merge, hotfix push) touching the fixture or
+    # its check — while dropping the redundant PR-branch run.
+    branches:
+      - main
     paths:
       - 'lingua-franca-api/scripts/**'
       - '.github/workflows/fixture-check.yml'
+  # Runs on EVERY PR to main (NO path filter). check-fixture is a REQUIRED status
+  # gate via branch protection, and a path-filtered required check hangs forever
+  # as "Expected — waiting for status to be reported" on PRs that don't touch the
+  # filtered paths — which forced three owner `--admin` merge bypasses (#14, #17,
+  # earlier) before this filter was removed. The check is fully offline and
+  # self-contained (smoke-test.sh --check-fixture only decodes the committed
+  # base64 fixture; it exits before any curl), so running it on every PR is cheap
+  # (~seconds) and keeps the gate from blocking unrelated PRs.
   pull_request:
-    paths:
-      - 'lingua-franca-api/scripts/**'
   workflow_dispatch:
 
 jobs:
@@ -31,3 +45,11 @@ jobs:
 
       - name: Run smoke-test.sh --check-fixture (offline, Linux)
         run: bash scripts/smoke-test.sh --check-fixture
+
+      # Self-lock this workflow's own triggers: push scoped to main, push.paths
+      # still watches the fixture scripts, and pull_request carries NO path filter
+      # (so the required check can never re-hang as "Expected"). Catches a silent
+      # re-broadening of the triggers that would double-run every PR or re-open the
+      # systemic path-filter gap that forced the admin bypasses above.
+      - name: Run trigger-topology guard (lock fixture-check triggers)
+        run: bash scripts/check-trigger-topology.sh ../.github/workflows/fixture-check.yml

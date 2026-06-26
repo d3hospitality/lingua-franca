@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Trigger-topology guard for alias-guard-check.yml. Locks the carefully-tuned
-# event triggers so the required `check-alias-guard` status check fires EXACTLY
+# Trigger-topology guard for a required-status-check workflow. Locks the
+# carefully-tuned event triggers so the required status check fires EXACTLY
 # ONCE per pull request and exactly once per direct-to-main commit — no more,
 # no less. Three invariants, each guarding a real regression this repo has hit:
 #
@@ -18,16 +18,22 @@
 #   [3] pull_request: carries NO `paths:` filter. The check is a REQUIRED status
 #       gate via branch protection; a path-filtered required check hangs forever
 #       as "Expected — waiting for status to be reported" on PRs that don't touch
-#       the filtered paths, blocking every unrelated PR. (memory:
+#       the filtered paths, blocking every unrelated PR — this exact gap forced
+#       three owner `--admin` merge bypasses (PRs #14, #17, earlier) before the
+#       offending required check (check-fixture) was un-path-filtered. (memory:
 #       github-required-check-context-name)
 #
-# Usage:  ./scripts/check-trigger-topology.sh
+# Usage:  ./scripts/check-trigger-topology.sh [workflow-path]
+#         The optional arg (relative to lingua-franca-api/) selects the workflow
+#         to guard; defaults to alias-guard-check.yml for back-compat. Pass
+#         ../.github/workflows/fixture-check.yml to lock the fixture gate too.
 # Exit:   0 = topology intact (one run per PR, one per main push), 1 = broken.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-WF="../.github/workflows/alias-guard-check.yml"
+WF="${1:-../.github/workflows/alias-guard-check.yml}"
+WF_NAME="$(basename "$WF" .yml)"
 
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
@@ -35,7 +41,7 @@ bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
 
 RC=0
 
-bold "== check-trigger-topology :: does alias-guard-check fire exactly once per PR and once per main push? =="
+bold "== check-trigger-topology :: does $WF_NAME fire exactly once per PR and once per main push? =="
 echo ""
 
 if [ ! -f "$WF" ]; then
@@ -72,7 +78,7 @@ if printf '%s\n' "$PUSH_BLOCK" | grep -q '^[[:space:]]*branches:' \
    && printf '%s\n' "$PUSH_BLOCK" | grep -Eq '^[[:space:]]*-[[:space:]]+main[[:space:]]*$'; then
   green "  PASS  push fires only on main — a PR feature-branch push won't duplicate the pull_request run"
 else
-  red   "  FAIL  push has no 'branches: [main]' filter — every PR touching the guarded paths runs check-alias-guard TWICE"
+  red   "  FAIL  push has no 'branches: [main]' filter — every PR touching the guarded paths runs $WF_NAME TWICE"
   RC=1
 fi
 echo ""
@@ -101,8 +107,8 @@ fi
 echo ""
 
 if [ "$RC" -eq 0 ]; then
-  green "== trigger topology verified: exactly one check-alias-guard run per PR, one per direct-to-main push =="
+  green "== trigger topology verified: exactly one $WF_NAME run per PR, one per direct-to-main push =="
 else
-  red   "== trigger topology BROKEN — alias-guard-check could double-run, miss a main hotfix, or hang the gate. Fix alias-guard-check.yml =="
+  red   "== trigger topology BROKEN — $WF_NAME could double-run, miss a main hotfix, or hang the gate. Fix $(basename "$WF") =="
 fi
 exit $RC
