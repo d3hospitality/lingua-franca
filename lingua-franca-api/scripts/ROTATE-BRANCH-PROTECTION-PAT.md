@@ -29,6 +29,26 @@ Same audit result, a fraction of the exposure. Least privilege.
 
 ---
 
+## Fast path — the guided wizard (recommended)
+
+One command collapses steps 1–4 into a single guided flow. It prints the exact
+field values, opens the mint page, then — reusing the one token you paste —
+pre-flights it, stores it only if it genuinely reads protection, and confirms the
+gate really re-verifies (by reading the audit log, not just its conclusion):
+
+```bash
+cd lingua-franca-api
+./scripts/mint-branch-protection-pat.sh
+```
+
+The only thing it can't do for you is the mint itself — that's the irreducible
+human action (GitHub mints fine-grained PATs only behind a web-UI consent click).
+You click **Generate**, copy, and paste; the wizard does the rest and rolls back
+guidance if anything fails. Prefer the manual steps below if you want to inspect
+each stage by hand.
+
+---
+
 ## 1 — Mint the fine-grained PAT (GitHub UI, ~2 min)
 
 1. <https://github.com/settings/personal-access-tokens/new>
@@ -117,6 +137,7 @@ Then mint a fresh fine-grained PAT and retry from step 1.
 
 ## Reference
 
+- Guided wizard (steps 1–4 in one command): [`mint-branch-protection-pat.sh`](./mint-branch-protection-pat.sh)
 - Storer / pre-flight: [`set-branch-protection-pat.sh`](./set-branch-protection-pat.sh)
 - Step-4 confirmer (dispatch + assert real PASS): [`confirm-rotation.sh`](./confirm-rotation.sh)
 - Gate assertion run by the workflow: [`check-branch-protection.sh`](./check-branch-protection.sh)
