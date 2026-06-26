@@ -63,7 +63,7 @@ python3 lingua_sprites.py
 
 Then open [http://localhost:5444](http://localhost:5444).
 
-A launcher lives at `~/Desktop/launchers/lingua-franca-sprites.command` —
+A launcher lives at `~/Desktop/d3-infra/launchers/lingua-franca-sprites.command` —
 double-click to boot, or wire it into the d3 dashboard.
 
 ## Style DNA

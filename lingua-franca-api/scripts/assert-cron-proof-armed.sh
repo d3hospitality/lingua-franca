@@ -65,7 +65,7 @@ fi
 CAP_OUT="$("$SCRIPT_DIR/capture-cron-proof.sh" 2>&1)"; CAP_RC=$?
 case "$CAP_RC" in
   0) green "  A. capture-cron-proof.sh already exits 0 — the proof is CAPTURED, nothing to arm."
-     echo ""; bold "ALREADY CAPTURED — mission closed. Re-run capture-cron-proof.sh to reprint the block."
+     echo ""; bold "ALREADY CAPTURED — mission closed. Re-run record-cron-proof.sh to durably (re)record the block to CRON-PROOF-CAPTURED.md (idempotent)."
      exit 0 ;;
   1) red "  A. capture-cron-proof.sh exits 1 — an UNATTENDED REGRESSION is already on record."
      red "     The apparatus is NOT cleanly armed; investigate the red/missing job first:"
@@ -129,7 +129,7 @@ echo ""
 if [ "$ARMED_B" -eq 1 ] && [ "$ARMED_C" -eq 1 ]; then
   green "ARMED — the next 13:17/13:30 UTC tick WILL capture the genuine $N_EXPECTED-job exit-0 proof."
   echo  "        Both crons are active and the latest main audit run is green across all $N_EXPECTED jobs."
-  echo  "        After the tick, run: ./scripts/capture-cron-proof.sh   (then check-proof-verdict-contract.sh)"
+  echo  "        After the tick, run: ./scripts/record-cron-proof.sh   (captures AND durably appends the WIN block to CRON-PROOF-CAPTURED.md — the print-only capture-cron-proof.sh would lose it to scrollback)."
   exit 0
 fi
 red "NOT ARMED — a precondition above is broken. Fix it BEFORE the next tick or the one-shot mis-fires."
