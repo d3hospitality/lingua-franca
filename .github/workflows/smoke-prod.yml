@@ -9,6 +9,8 @@
 #
 # Cost note: [2] and [3] make real paid GPT + Whisper/Deepgram calls against prod
 # (a few cents/run). It runs once per production deploy + a daily canary, not per push.
+# Re-parse bump 2026-06-26: push to force GitHub to re-index the repository_dispatch
+# trigger so `prod-deployed` events start matching (see deploy.sh dispatch hook).
 name: smoke-prod
 
 on:
