@@ -40,6 +40,9 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Same default as record-cron-proof.sh so both resolve the SAME durable sink when
+# neither is given RECORD_FILE — lets gate C VERIFY (not just assert) the on-disk win.
+RECORD_FILE="${RECORD_FILE:-$(dirname "$SCRIPT_DIR")/CRON-PROOF-CAPTURED.md}"
 
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
@@ -86,10 +89,24 @@ rule
 rule
 echo ""
 case "$C" in
-  0) green "════════════════════════════════════════════════════════════════"
+  0) # DURABILITY ASSERTION — record-cron-proof.sh exited 0, but VERIFY the WIN block
+     # actually landed on disk before declaring victory. record-cron-proof.sh has a
+     # silent no-write path: if capture exits 0 but its output carries no record block,
+     # record WARNs and still exits 0 having written NOTHING (lines 39-42). A failed
+     # append (read-only dir, full disk) is likewise invisible to the exit code. The
+     # mission's success criteria explicitly require the proof be durable, so trust
+     # the file, not the exit code.
+     if [ ! -f "$RECORD_FILE" ] || ! grep -qE 'UNATTENDED .*-JOB EXIT-0 PROOF CAPTURED' "$RECORD_FILE" 2>/dev/null; then
+       red "[C] capture exited 0 but the WIN block is NOT durably on disk:"
+       red "      $RECORD_FILE"
+       red "    record-cron-proof.sh returned 0 without persisting the proof (no-block WARN-skip,"
+       red "    or a failed write). Refusing to declare CLOSED on an unverifiable proof."
+       echo ""; red "BLOCKED (exit 1): proof not durable — re-run after confirming \$RECORD_FILE is writable."; exit 1
+     fi
+     green "════════════════════════════════════════════════════════════════"
      green " MISSION CLOSED — genuine UNATTENDED N-job exit-0 cron proof captured."
      green "════════════════════════════════════════════════════════════════"
-     bold  " The WIN block was durably appended to CRON-PROOF-CAPTURED.md (survives scrollback)."
+     bold  " The WIN block is durably present in CRON-PROOF-CAPTURED.md (VERIFIED on disk)."
      bold  " Next: paste that record block into proof-armed-bidirectional-jobs-check.md"
      bold  "       and report the locked cron-proof mission as CLOSED."
      exit 0 ;;
