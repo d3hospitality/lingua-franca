@@ -48,6 +48,11 @@ EOF
 #!/usr/bin/env bash
 printf 'B' >> "$STUB_ORDER"; exit "${STUB_B:-0}"
 EOF
+  # durability-header contract stub (gate B2): logs 'D', exits the per-gate code.
+  cat > "$work/check-record-durability-contract.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'D' >> "$STUB_ORDER"; exit "${STUB_D:-0}"
+EOF
   # record stub: logs 'C', and on exit 0 ALSO writes a fixture WIN block to
   # $RECORD_FILE — mirroring the real durable wrapper — UNLESS STUB_C_NOWRITE=1,
   # which simulates record's silent no-write path (capture exit 0 but block lost).
@@ -64,13 +69,14 @@ EOF
   printf '%s' "$work"
 }
 
-# run_case A B C [NOWRITE] → echoes "<exit> <order>" from a fresh sandbox of the
-# REAL orch. RECORD_FILE points inside the sandbox so gate C's durability check
-# reads the fixture the record stub writes. NOWRITE=1 suppresses that write.
+# run_case A B C D [NOWRITE] → echoes "<exit> <order>" from a fresh sandbox of the
+# REAL orch. Gates run A→B→B2(D)→C, so the order log reads e.g. "ABDC". RECORD_FILE
+# points inside the sandbox so gate C's readback reads the fixture the record stub
+# writes. NOWRITE=1 suppresses that write.
 run_case() {
   local work; work="$(make_sandbox "$ORCH_REAL")"
   local order="$work/order.log"; : > "$order"
-  STUB_A="$1" STUB_B="$2" STUB_C="$3" STUB_C_NOWRITE="${4:-0}" \
+  STUB_A="$1" STUB_B="$2" STUB_C="$3" STUB_D="$4" STUB_C_NOWRITE="${5:-0}" \
     STUB_ORDER="$order" RECORD_FILE="$work/CRON-PROOF-CAPTURED.md" \
     "$work/close-cron-proof-mission.sh" >/dev/null 2>&1
   local ec=$?
@@ -78,49 +84,58 @@ run_case() {
   rm -rf "$work"
 }
 
-# assert label  A B C  → expected_exit expected_order   [NOWRITE]
+# assert label  A B C D  → expected_exit expected_order   [NOWRITE]
 assert() {
   local label="$1" got want_exit want_order
-  got="$(run_case "$2" "$3" "$4" "${7:-0}")"
-  want_exit="$5"; want_order="$6"
+  got="$(run_case "$2" "$3" "$4" "$5" "${8:-0}")"
+  want_exit="$6"; want_order="$7"
   local ge="${got%% *}" go="${got##* }"
   if [ "$ge" = "$want_exit" ] && [ "$go" = "$want_order" ]; then
-    green "$label  (A=$2 B=$3 C=$4 → exit $ge, ran [$go])"
+    green "$label  (A=$2 B=$3 C=$4 D=$5 → exit $ge, ran [$go])"
   else
-    red "$label  (A=$2 B=$3 C=$4 → exit $ge ran [$go]; WANT exit $want_exit ran [$want_order])"
+    red "$label  (A=$2 B=$3 C=$4 D=$5 → exit $ge ran [$go]; WANT exit $want_exit ran [$want_order])"
   fi
 }
 
 bold "== close-cron-proof-mission.selftest :: gate→verdict truth table (offline) =="
 echo ""
 
-bold "[1] Gate A aborts — apparatus NOT ARMED / inconclusive (B & C must NOT run)"
-assert "A=1 NOT ARMED      → BLOCKED, stop at A" 1 0 0  1 "A"
-assert "A=2 inconclusive   → NOT YET, stop at A" 2 0 0  2 "A"
+bold "[1] Gate A aborts — apparatus NOT ARMED / inconclusive (B, B2, C must NOT run)"
+assert "A=1 NOT ARMED      → BLOCKED, stop at A" 1 0 0 0  1 "A"
+assert "A=2 inconclusive   → NOT YET, stop at A" 2 0 0 0  2 "A"
 echo ""
 
-bold "[2] Gate B aborts — contract drift after A passed (C must NOT run)"
-assert "A=0 B=1 drift       → BLOCKED, stop at B" 0 1 0  1 "AB"
-assert "A=0 B=2 drift(!=0)  → BLOCKED, stop at B" 0 2 0  1 "AB"
+bold "[2] Gate B aborts — verdict-contract drift after A passed (B2 & C must NOT run)"
+assert "A=0 B=1 drift       → BLOCKED, stop at B" 0 1 0 0  1 "AB"
+assert "A=0 B=2 drift(!=0)  → BLOCKED, stop at B" 0 2 0 0  1 "AB"
 echo ""
 
-bold "[3] Gate C decides — A & B both clean, all three gates run"
-assert "C=0 WIN PATH        → MISSION CLOSED" 0 0 0  0 "ABC"   # tomorrow's tick
-assert "C=2 PENDING         → NOT YET"        0 0 2  2 "ABC"   # today's live state
-assert "C=1 regression      → BLOCKED"        0 0 1  1 "ABC"
-assert "C=3 odd nonzero     → BLOCKED (default arm)" 0 0 3  1 "ABC"
+bold "[2b] Gate B2 — durability-header contract guard (after B passed, before C)"
+# D=1 = DRIFT: record's WIN-block header and gate C's readback grep diverged → a
+# real durable proof would read as 'not durable' → must ABORT before C false-blocks.
+assert "B2=1 header DRIFT   → BLOCKED, stop at B2" 0 0 0 1  1 "ABD"
+# D=2 = INCONCLUSIVE (a source line moved): static check can't prove the handshake,
+# but gate C's real on-disk readback is the backstop → WARN and CONTINUE to C.
+assert "B2=2 inconclusive   → continue to C (warn)" 0 0 0 2  0 "ABDC"
 echo ""
 
-bold "[3b] Durability gate — record exit 0 but NO win block on disk MUST NOT close"
+bold "[3] Gate C decides — A, B, B2 all clean, all four gates run"
+assert "C=0 WIN PATH        → MISSION CLOSED" 0 0 0 0  0 "ABDC"   # tomorrow's tick
+assert "C=2 PENDING         → NOT YET"        0 0 2 0  2 "ABDC"   # today's live state
+assert "C=1 regression      → BLOCKED"        0 0 1 0  1 "ABDC"
+assert "C=3 odd nonzero     → BLOCKED (default arm)" 0 0 3 0  1 "ABDC"
+echo ""
+
+bold "[3b] Durability readback — record exit 0 but NO win block on disk MUST NOT close"
 # Simulates record-cron-proof.sh's silent no-write path / a failed append: capture
 # exits 0 yet CRON-PROOF-CAPTURED.md never gets the block. The mission requires the
 # proof be durable, so the orchestrator must BLOCK, not declare a false victory.
-assert "C=0 but file empty  → BLOCKED (no durable proof)" 0 0 0  1 "ABC"  1
+assert "C=0 but file empty  → BLOCKED (no durable proof)" 0 0 0 0  1 "ABDC"  1
 echo ""
 
-bold "[4] Gate A 'already captured' passthrough — A=0 continues to B/C"
+bold "[4] Gate A 'already captured' passthrough — A=0 continues to B/B2/C"
 # (A's case{} only special-cases 1 & 2; any other A code falls through to ARMED)
-assert "A=3 odd → treated as armed, reaches C=0 WIN" 3 0 0  0 "ABC"
+assert "A=3 odd → treated as armed, reaches C=0 WIN" 3 0 0 0  0 "ABDC"
 echo ""
 
 # ── Mutation guard: prove the harness has TEETH ───────────────────────────────
@@ -134,7 +149,7 @@ if perl -0pi -e 's/(MISSION CLOSED.*?)exit 0 ;;/${1}exit 2 ;;/s' "$MUT/close-cro
   morder="$MUT/order.log"; : > "$morder"
   # RECORD_FILE set + stub writes the block so the durability gate PASSES — isolating
   # the win-path mapping mutation as the sole cause of a non-zero exit.
-  STUB_A=0 STUB_B=0 STUB_C=0 STUB_ORDER="$morder" RECORD_FILE="$MUT/CRON-PROOF-CAPTURED.md" \
+  STUB_A=0 STUB_B=0 STUB_C=0 STUB_D=0 STUB_ORDER="$morder" RECORD_FILE="$MUT/CRON-PROOF-CAPTURED.md" \
     "$MUT/close-cron-proof-mission.sh" >/dev/null 2>&1
   mec=$?
   if [ "$mec" -ne 0 ]; then

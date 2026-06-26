@@ -23,6 +23,11 @@
 #   B. CONTRACT next    — capture recognises the proof by grepping the producer's stdout.
 #      If that handshake drifted, capture's exit 0 is a false pass. So the contract MUST
 #      hold before we are willing to accept a green capture as proof.
+#   B2. DURABILITY next — gate C confirms the win by re-reading CRON-PROOF-CAPTURED.md.
+#      That readback is the literal twin of the header record-cron-proof.sh WRITES. If
+#      those two strings drift, a real durable proof reads as 'not durable' and gate C
+#      FALSELY blocks — only after the 24h wait. So the durability-header handshake MUST
+#      hold before we trust gate C's readback (symmetric with B, locks the OTHER half).
 #   C. CAPTURE last     — only now is its verdict trustworthy. exit 0 ⇒ mission CLOSED.
 #                         Uses record-cron-proof.sh (not the print-only capture) so the WIN
 #                         block is durably written to CRON-PROOF-CAPTURED.md, not just echoed.
@@ -78,6 +83,35 @@ if [ "$B" -ne 0 ]; then
   echo ""; red "BLOCKED (exit 1): verdict handshake broken — fix the producer/consumer before trusting any capture."; exit 1
 fi
 green "[B] handshake intact — capture's verdict is trustworthy."
+echo ""
+
+# ── Gate B2: DURABILITY CONTRACT — does gate C's readback agree with the writer? ─
+# Gate C (below) declares the mission CLOSED only after re-finding the WIN block on
+# disk by grepping CRON-PROOF-CAPTURED.md. That readback is the LITERAL twin of the
+# header record-cron-proof.sh writes. If those two strings ever drift (a future
+# edit renames the header in one but not the other), the genuine, durable proof
+# would be on disk yet gate C's grep would MISS it — a FALSE BLOCK surfacing only
+# AFTER the ~24h tick wait. check-record-durability-contract.sh live-extracts both
+# literals (plus record's sed extractor) and proves they still agree. We run it
+# here, BEFORE trusting gate C's readback, so drift aborts with a clear "fix the
+# header before the tick" message instead of a baffling post-tick false BLOCK.
+# Symmetric with gate B, which locks the OTHER win-path handshake.
+#   exit 1 = DRIFT → abort (gate C would mis-fire). exit 2 = INCONCLUSIVE (a source
+#   line moved) → warn but CONTINUE: gate C's real on-disk readback is the backstop,
+#   so an unprovable static check must not block a genuine win.
+bold "[B2] durability ── check-record-durability-contract.sh"
+rule
+"$SCRIPT_DIR/check-record-durability-contract.sh"; B2=$?
+rule
+case "$B2" in
+  1) red "[B2] DURABILITY DRIFT — record-cron-proof.sh's WIN-block header and gate C's"
+     red "     readback grep no longer agree. A genuine, durable proof would be reported"
+     red "     as 'not durable' and the closeout would FALSELY BLOCK after the tick."
+     echo ""; red "BLOCKED (exit 1): durability-header handshake broken — fix the literals before the tick."; exit 1 ;;
+  2) yellow "[B2] INCONCLUSIVE — a source line moved (refactor); could not statically prove the"
+     yellow "     handshake. Continuing: gate C's real on-disk readback remains the backstop." ;;
+  *) green "[B2] durability handshake intact — gate C's readback will re-find the written proof." ;;
+esac
 echo ""
 
 # ── Gate C: CAPTURE — is the genuine unattended N-job exit-0 proof captured? ──
