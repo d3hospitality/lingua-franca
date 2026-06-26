@@ -19,9 +19,10 @@
 #      and state==active (a workflow GitHub disabled never ticks).
 #   2. Each declares its expected cron, and the proof fires AFTER the audit on the
 #      same hour (the coupling that lets the audit run reach `completed` first).
-#   3. Every job id the audit defines is in the verifier's default JOBS list and has
-#      NO job-level name: override — so the verifier's `.name==id` job match resolves
-#      at the tick instead of false-failing "NOT FOUND".
+#   3. The audit's job ids and the verifier's default JOBS list match 1:1 (every
+#      audit job is covered so none can go silently green-overall, AND no stale JOBS
+#      entry lingers that the tick would report NOT FOUND), with NO job-level name:
+#      override — so the verifier's `.name==id` job match resolves at the tick.
 #   4. The proof workflow actually invokes check-schedule-fired.sh and maps its exit
 #      codes safely (exit 2 -> neutral, never a false alarm before the window).
 #
@@ -156,6 +157,17 @@ else
       FAIL=1; miss=1
     fi
   done
+  # reverse direction: a stale JOBS entry with no matching audit job. At the tick the
+  # verifier's select(.name==id) finds nothing for it → classified 'removed' → FALSE
+  # exit 1, wasting the one-time wall-clock proof. Catch the drift here, pre-tick.
+  stale=0
+  for id in $VERIFIER_JOBS; do
+    if ! printf ' %s ' "$AUDIT_JOB_IDS" | tr '\n' ' ' | grep -q " $id "; then
+      red "  FAIL  verifier JOBS default lists '$id', which is NOT a current audit job id —"
+      red "        the tick would report it NOT FOUND and false-fail the proof (drift: job renamed/removed)."
+      FAIL=1; stale=1
+    fi
+  done
   # a name: override on any job would break .name==id matching
   ovr="$(awk '
     /^jobs:/ {injobs=1; next}
@@ -169,9 +181,9 @@ else
     red "        verifier's select(.name==id) match returns NOT FOUND at the tick (false exit 1)."
     FAIL=1
   fi
-  if [ "$miss" -eq 0 ] && [ -z "$ovr" ]; then
+  if [ "$miss" -eq 0 ] && [ "$stale" -eq 0 ] && [ -z "$ovr" ]; then
     n=$(printf '%s\n' $AUDIT_JOB_IDS | grep -c .)
-    green "  OK    all $n audit job id(s) covered by verifier JOBS, none has a name: override."
+    green "  OK    all $n audit job id(s) covered by verifier JOBS 1:1, none stale, none has a name: override."
   fi
 fi
 
