@@ -28,3 +28,5 @@ npm run build
 # Deploy to Vercel
 vercel --prod
 ```
+
+<!-- out-of-path CI proof: this README-only change must reach mergeStateStatus CLEAN and merge WITHOUT --admin, confirming the un-filtered check-fixture gate (96791fb, #18) no longer hangs on PRs that touch zero filtered paths. First independent post-merge proof. -->
