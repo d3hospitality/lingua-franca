@@ -33,7 +33,9 @@ on:
       - 'lingua-franca-api/scripts/check-merge-gate-all.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.sh'
       - 'lingua-franca-api/scripts/check-schedule-fired.selftest.sh'
+      - 'lingua-franca-api/scripts/check-proof-armed.sh'
       - '.github/workflows/branch-protection-audit.yml'
+      - '.github/workflows/schedule-fired-proof.yml'
 
 jobs:
   audit-branch-protection:
@@ -119,6 +121,43 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=selftest-schedule-verifier::Inconclusive (exit 2) — jq was unavailable on the runner, so the harness was skipped. Verifier logic NOT proven this run."
+            exit 0
+          fi
+          exit $rc
+
+  # PRE-FLIGHT WIRING GUARD: the two cron checks above prove LOGIC (selftest) and,
+  # at the tick, that the cron ACTUALLY FIRED green (check-schedule-fired.sh, run by
+  # schedule-fired-proof.yml at 13:30). Neither asserts — BEFORE the tick — that the
+  # live apparatus is still wired so the one-time wall-clock proof isn't wasted on a
+  # false-fail: a workflow GitHub disabled for repo inactivity, a job renamed out
+  # from under the verifier's JOBS default, the proof de-indexed, or the proof tick
+  # reordered ahead of the audit. check-proof-armed.sh asserts all of that against
+  # the LIVE repo + default-branch workflow copies every run, at any hour. Reading
+  # workflow state needs only actions:read, which the default GITHUB_TOKEN has — so
+  # like audit-merge-gate it never needs a PAT. This job is itself one of the four
+  # the verifier enforces (memory: check-schedule-fired-cron-verifier), closing the
+  # loop: the pre-flight guard is covered by the same tick it protects.
+  audit-proof-armed:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # exit 0 = apparatus armed (pass) · exit 1 = mis-wired, a real regression that
+      # would waste/false the next proof (FAIL the job) · exit 2 = inconclusive
+      # (gh/jq missing, API blip, or a workflow file absent) → neutral warning, never
+      # paged as a regression.
+      - name: Assert the cron-proof apparatus is armed for the next tick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          bash scripts/check-proof-armed.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=audit-proof-armed::Inconclusive (exit 2) — gh/jq unavailable, API blip, or a workflow file absent. Pre-flight wiring NOT verified this run."
             exit 0
           fi
           exit $rc

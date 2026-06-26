@@ -88,57 +88,66 @@ STALE="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 run_obj() { # run_obj <status> <conclusion> <createdAt>
   printf '[{"databaseId":777,"status":"%s","conclusion":"%s","createdAt":"%s","headBranch":"main","url":"https://x/777"}]' "$1" "$2" "$3"
 }
-jobs_obj() { # jobs_obj <bp-concl> <mg-concl> <st-concl>  (empty string omits that job)
-  # Mirrors the THREE jobs branch-protection-audit.yml defines, matching the
+jobs_obj() { # jobs_obj <bp-concl> <mg-concl> <st-concl> <pa-concl>  (empty string omits that job)
+  # Mirrors the FOUR jobs branch-protection-audit.yml defines, matching the
   # verifier's default JOBS list. The 3rd (selftest-schedule-verifier) is the
-  # offline-logic guard CUSTODIAN added in PR #12; it must be enforced too.
+  # offline-logic guard CUSTODIAN added in PR #12; the 4th (audit-proof-armed) is
+  # the pre-flight wiring guard OPS added — both must be enforced too.
   local arr="[]"
   [ -n "$1" ] && arr="$(printf '%s' "$arr" | jq --arg c "$1" '. + [{"name":"audit-branch-protection","conclusion":$c}]')"
   [ -n "$2" ] && arr="$(printf '%s' "$arr" | jq --arg c "$2" '. + [{"name":"audit-merge-gate","conclusion":$c}]')"
   [ -n "$3" ] && arr="$(printf '%s' "$arr" | jq --arg c "$3" '. + [{"name":"selftest-schedule-verifier","conclusion":$c}]')"
+  [ -n "$4" ] && arr="$(printf '%s' "$arr" | jq --arg c "$4" '. + [{"name":"audit-proof-armed","conclusion":$c}]')"
   printf '{"jobs":%s}' "$arr"
 }
 
 bold "== check-schedule-fired.selftest :: drive every exit path of the cron verifier =="
 echo ""
 
-# 1) Happy path: fresh schedule run, success, all THREE required jobs green -> exit 0.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success)")"
-expect "fresh green schedule run, all three jobs green -> PASS"   "$EX" 0
+# 1) Happy path: fresh schedule run, success, all FOUR required jobs green -> exit 0.
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success)")"
+expect "fresh green schedule run, all four jobs green -> PASS"    "$EX" 0
 
 # 2) The regression this guard EXISTS to catch: cron fired but run failed -> 1.
-EX="$(run_case "$(run_obj completed failure "$FRESH")" "$(jobs_obj failure success success)")"
+EX="$(run_case "$(run_obj completed failure "$FRESH")" "$(jobs_obj failure success success success)")"
 expect "schedule run concluded 'failure' -> REGRESSION"          "$EX" 1
 
 # 3) Overall green umbrella but a required job is red -> must still fail (1).
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj failure success success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj failure success success success)")"
 expect "overall success but audit-branch-protection red -> FAIL" "$EX" 1
 
 # 4) A required job silently renamed/removed (not in jobs list) -> fail (1).
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj '' success success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj '' success success success)")"
 expect "required job missing from run -> FAIL"                    "$EX" 1
 
 # 4b) The 3rd job (selftest-schedule-verifier) silently SKIPPED while overall is
 #     still 'success' (skipped jobs don't flip a run to failure) -> must fail (1).
 #     This is the exact gap the JOBS-list update closes: without the 3rd job in the
 #     verifier's default list, this case would PASS blind. It is the proof of fix.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success '')")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success '' success)")"
 expect "selftest-schedule-verifier skipped, overall green -> FAIL" "$EX" 1
 
+# 4c) The 4th job (audit-proof-armed) silently SKIPPED while overall is still
+#     'success' -> must fail (1). Mirrors 4b for the new pre-flight wiring job: if
+#     audit-proof-armed were dropped from the verifier's JOBS default, a run that
+#     skipped it would pass blind. This case proves the 4-job coupling has teeth.
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success '')")"
+expect "audit-proof-armed skipped, overall green -> FAIL"        "$EX" 1
+
 # 5) No schedule run yet (empty array) -> PENDING, inconclusive (2).
-EX="$(run_case "[]" "$(jobs_obj success success success)")"
+EX="$(run_case "[]" "$(jobs_obj success success success success)")"
 expect "no schedule run yet -> PENDING (inconclusive)"           "$EX" 2
 
 # 6) Stale: a green run, but older than the freshness window -> inconclusive (2).
-EX="$(run_case "$(run_obj completed success "$STALE")" "$(jobs_obj success success success)")"
+EX="$(run_case "$(run_obj completed success "$STALE")" "$(jobs_obj success success success success)")"
 expect "green run older than 26h -> STALE (inconclusive)"        "$EX" 2
 
 # 7) Run still in progress (not completed) -> PENDING, inconclusive (2).
-EX="$(run_case "$(run_obj in_progress '' "$FRESH")" "$(jobs_obj success success success)")"
+EX="$(run_case "$(run_obj in_progress '' "$FRESH")" "$(jobs_obj success success success success)")"
 expect "run still in_progress -> PENDING (inconclusive)"         "$EX" 2
 
 # 8) gh API error on `run list` (non-zero exit) -> inconclusive, never 1.
-EX="$(run_case "" "$(jobs_obj success success success)" 1)"
+EX="$(run_case "" "$(jobs_obj success success success success)" 1)"
 expect "gh run list errors -> inconclusive, not regression"      "$EX" 2
 
 echo ""
