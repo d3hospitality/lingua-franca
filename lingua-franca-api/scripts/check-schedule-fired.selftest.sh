@@ -80,25 +80,25 @@ chmod +x "$TMP/bin/gh"
 export FAKE_DIR="$TMP"
 export FAKE_RUNSHA="RUNSHA777"
 
-# The six jobs branch-protection-audit.yml defines, and a helper that renders a
+# The seven jobs branch-protection-audit.yml defines, and a helper that renders a
 # minimal workflow body containing a chosen subset — used to simulate the
 # workflow as it stood at the run's head SHA vs. on main now.
-ALL6="audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology selftest-saga-aggregate"
+ALL7="audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology selftest-saga-aggregate audit-schedule-jobs-sync"
 wf_body() { # wf_body "<space-separated job ids>"
   printf 'name: branch-protection-audit\njobs:\n'
   for j in $1; do printf '  %s:\n    runs-on: ubuntu-latest\n' "$j"; done
 }
 
 # Run the target with the stubbed PATH and a chosen scenario, capture exit code.
-# WF_RUNSHA_JOBS / WF_MAIN_JOBS (default: all five) control the workflow body the
+# WF_RUNSHA_JOBS / WF_MAIN_JOBS (default: all seven) control the workflow body the
 # stub serves for the run's head SHA and for main respectively — this is how the
 # added-after-run (benign) case is distinguished from skipped/removed (regression).
 run_case() { # run_case "runlist.json contents" "jobs.json contents" [runlist.rc]
   printf '%s' "$1" > "$TMP/runlist.json"
   printf '%s' "$2" > "$TMP/jobs.json"
   printf '%s' "${3:-0}" > "$TMP/runlist.rc"
-  wf_body "${WF_RUNSHA_JOBS:-$ALL6}" > "$TMP/wf_runsha.yml"
-  wf_body "${WF_MAIN_JOBS:-$ALL6}" > "$TMP/wf_main.yml"
+  wf_body "${WF_RUNSHA_JOBS:-$ALL7}" > "$TMP/wf_runsha.yml"
+  wf_body "${WF_MAIN_JOBS:-$ALL7}" > "$TMP/wf_main.yml"
   PATH="$TMP/bin:$PATH" REPO=fake/repo "$TARGET" >/dev/null 2>&1
   echo $?
 }
@@ -117,13 +117,14 @@ STALE="$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 run_obj() { # run_obj <status> <conclusion> <createdAt> [headSha]
   printf '[{"databaseId":777,"status":"%s","conclusion":"%s","createdAt":"%s","headBranch":"main","headSha":"%s","url":"https://x/777"}]' "$1" "$2" "$3" "${4:-RUNSHA777}"
 }
-jobs_obj() { # jobs_obj <bp> <mg> <st> <pa> <rt> <sa>  (empty string omits that job)
-  # Mirrors the SIX jobs branch-protection-audit.yml defines, matching the
+jobs_obj() { # jobs_obj <bp> <mg> <st> <pa> <rt> <sa> <sj>  (empty string omits that job)
+  # Mirrors the SEVEN jobs branch-protection-audit.yml defines, matching the
   # verifier's default JOBS list. The 3rd (selftest-schedule-verifier) is the
   # offline-logic guard CUSTODIAN added in PR #12; the 4th (audit-proof-armed) is
   # the pre-flight wiring guard OPS added; the 5th (audit-required-checks-topology)
   # is the self-extending topology audit PR #20 added; the 6th (selftest-saga-
-  # aggregate) is the whole-apparatus roll-up OPS added — all must be enforced too.
+  # aggregate) is the whole-apparatus roll-up OPS added; the 7th (audit-schedule-
+  # jobs-sync) is the JOBS-default drift guard CUSTODIAN added — all must be enforced.
   local arr="[]"
   [ -n "$1" ] && arr="$(printf '%s' "$arr" | jq --arg c "$1" '. + [{"name":"audit-branch-protection","conclusion":$c}]')"
   [ -n "$2" ] && arr="$(printf '%s' "$arr" | jq --arg c "$2" '. + [{"name":"audit-merge-gate","conclusion":$c}]')"
@@ -131,56 +132,66 @@ jobs_obj() { # jobs_obj <bp> <mg> <st> <pa> <rt> <sa>  (empty string omits that 
   [ -n "$4" ] && arr="$(printf '%s' "$arr" | jq --arg c "$4" '. + [{"name":"audit-proof-armed","conclusion":$c}]')"
   [ -n "$5" ] && arr="$(printf '%s' "$arr" | jq --arg c "$5" '. + [{"name":"audit-required-checks-topology","conclusion":$c}]')"
   [ -n "$6" ] && arr="$(printf '%s' "$arr" | jq --arg c "$6" '. + [{"name":"selftest-saga-aggregate","conclusion":$c}]')"
+  [ -n "$7" ] && arr="$(printf '%s' "$arr" | jq --arg c "$7" '. + [{"name":"audit-schedule-jobs-sync","conclusion":$c}]')"
   printf '{"jobs":%s}' "$arr"
 }
 
 bold "== check-schedule-fired.selftest :: drive every exit path of the cron verifier =="
 echo ""
 
-# 1) Happy path: fresh schedule run, success, all SIX required jobs green -> exit 0.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success success success)")"
-expect "fresh green schedule run, all six jobs green -> PASS"     "$EX" 0
+# 1) Happy path: fresh schedule run, success, all SEVEN required jobs green -> exit 0.
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success success success success)")"
+expect "fresh green schedule run, all seven jobs green -> PASS"   "$EX" 0
 
 # 2) The regression this guard EXISTS to catch: cron fired but run failed -> 1.
-EX="$(run_case "$(run_obj completed failure "$FRESH")" "$(jobs_obj failure success success success success success)")"
+EX="$(run_case "$(run_obj completed failure "$FRESH")" "$(jobs_obj failure success success success success success success)")"
 expect "schedule run concluded 'failure' -> REGRESSION"          "$EX" 1
 
 # 3) Overall green umbrella but a required job is red -> must still fail (1).
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj failure success success success success success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj failure success success success success success success)")"
 expect "overall success but audit-branch-protection red -> FAIL" "$EX" 1
 
 # 4) A required job absent from the run while it DID exist at the run's head SHA
-#    (default wf_runsha contains all six) -> skipped/not enforced -> fail (1).
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj '' success success success success success)")"
+#    (default wf_runsha contains all seven) -> skipped/not enforced -> fail (1).
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj '' success success success success success success)")"
 expect "job absent from run but present at run SHA -> FAIL"       "$EX" 1
 
 # 4b) The 3rd job (selftest-schedule-verifier) silently SKIPPED while overall is
 #     still 'success' (skipped jobs don't flip a run to failure) -> must fail (1).
 #     This is the exact gap the JOBS-list update closes: without the 3rd job in the
 #     verifier's default list, this case would PASS blind. It is the proof of fix.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success '' success success success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success '' success success success success)")"
 expect "selftest-schedule-verifier skipped, overall green -> FAIL" "$EX" 1
 
 # 4c) The 4th job (audit-proof-armed) silently SKIPPED while overall is still
 #     'success' -> must fail (1). Mirrors 4b for the new pre-flight wiring job: if
 #     audit-proof-armed were dropped from the verifier's JOBS default, a run that
 #     skipped it would pass blind. This case proves the 4-job coupling has teeth.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success '' success success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success '' success success success)")"
 expect "audit-proof-armed skipped, overall green -> FAIL"        "$EX" 1
 
 # 4d) The 5th job (audit-required-checks-topology) silently SKIPPED while overall
 #     is still 'success' -> must fail (1). Mirrors 4b/4c for the topology audit PR
 #     #20 added: if it were dropped from the verifier's JOBS default, a run that
 #     skipped it would pass blind. This case proves the 5-job coupling has teeth.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success)")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success success)")"
 expect "audit-required-checks-topology skipped, overall green -> FAIL" "$EX" 1
 
 # 4d2) The 6th job (selftest-saga-aggregate) silently SKIPPED while overall is still
 #     'success' -> must fail (1). Mirrors 4b/4c/4d for the whole-apparatus roll-up
 #     OPS added: if it were dropped from the verifier's JOBS default, a run that
 #     skipped it would pass blind. This case proves the 6-job coupling has teeth.
-EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success success '')")"
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success success '' success)")"
 expect "selftest-saga-aggregate skipped, overall green -> FAIL"  "$EX" 1
+
+# 4d3) The 7th job (audit-schedule-jobs-sync) silently SKIPPED while overall is still
+#     'success' -> must fail (1). Mirrors 4b/4c/4d/4d2 for the JOBS-default drift
+#     guard CUSTODIAN added: if it were dropped from the verifier's JOBS default, a
+#     run that skipped it would pass blind. This case proves the 7-job coupling has
+#     teeth — and that adding THIS job completed its own 3-touch (workflow + JOBS
+#     default + this stub) rather than leaving the verifier checking a stale set.
+EX="$(run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success success success '')")"
+expect "audit-schedule-jobs-sync skipped, overall green -> FAIL" "$EX" 1
 
 # 4e) The false-fail fix: a job ADDED to the workflow AFTER an older schedule run
 #     fired — absent from the run AND absent at the run's head SHA, but present on
@@ -189,8 +200,8 @@ expect "selftest-saga-aggregate skipped, overall green -> FAIL"  "$EX" 1
 #     indistinguishable from 4d and would false-FAIL for the one tick between
 #     landing a new audit job and its first scheduled run. This is THE fix.
 EX="$(WF_RUNSHA_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
-      WF_MAIN_JOBS="$ALL6" \
-      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success)")"
+      WF_MAIN_JOBS="$ALL7" \
+      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success success)")"
 expect "5th job added after run fired (on main, not at run SHA) -> PENDING" "$EX" 2
 
 # 4f) Genuine removal everywhere — absent from the run, from the run's head SHA,
@@ -199,23 +210,23 @@ expect "5th job added after run fired (on main, not at run SHA) -> PENDING" "$EX
 #     benign exit-2 isn't a blanket "missing job is always fine" regression.
 EX="$(WF_RUNSHA_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
       WF_MAIN_JOBS='audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed' \
-      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success)")"
+      run_case "$(run_obj completed success "$FRESH")" "$(jobs_obj success success success success '' success success)")"
 expect "5th job removed from run, run SHA, and main -> FAIL"      "$EX" 1
 
 # 5) No schedule run yet (empty array) -> PENDING, inconclusive (2).
-EX="$(run_case "[]" "$(jobs_obj success success success success success success)")"
+EX="$(run_case "[]" "$(jobs_obj success success success success success success success)")"
 expect "no schedule run yet -> PENDING (inconclusive)"           "$EX" 2
 
 # 6) Stale: a green run, but older than the freshness window -> inconclusive (2).
-EX="$(run_case "$(run_obj completed success "$STALE")" "$(jobs_obj success success success success success success)")"
+EX="$(run_case "$(run_obj completed success "$STALE")" "$(jobs_obj success success success success success success success)")"
 expect "green run older than 26h -> STALE (inconclusive)"        "$EX" 2
 
 # 7) Run still in progress (not completed) -> PENDING, inconclusive (2).
-EX="$(run_case "$(run_obj in_progress '' "$FRESH")" "$(jobs_obj success success success success success success)")"
+EX="$(run_case "$(run_obj in_progress '' "$FRESH")" "$(jobs_obj success success success success success success success)")"
 expect "run still in_progress -> PENDING (inconclusive)"         "$EX" 2
 
 # 8) gh API error on `run list` (non-zero exit) -> inconclusive, never 1.
-EX="$(run_case "" "$(jobs_obj success success success success success success)" 1)"
+EX="$(run_case "" "$(jobs_obj success success success success success success success)" 1)"
 expect "gh run list errors -> inconclusive, not regression"      "$EX" 2
 
 echo ""

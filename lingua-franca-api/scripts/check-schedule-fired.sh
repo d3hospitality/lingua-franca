@@ -57,7 +57,7 @@ REPO="${REPO:-d3hospitality/lingua-franca}"
 WORKFLOW="${WORKFLOW:-branch-protection-audit.yml}"
 BRANCH="${BRANCH:-main}"
 MAX_AGE_H="${MAX_AGE_H:-26}"
-JOBS_RAW="${JOBS:-audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology selftest-saga-aggregate}"
+JOBS_RAW="${JOBS:-audit-branch-protection audit-merge-gate selftest-schedule-verifier audit-proof-armed audit-required-checks-topology selftest-saga-aggregate audit-schedule-jobs-sync}"
 read -r -a JOBS <<< "$(printf '%s' "$JOBS_RAW" | tr ',' ' ')"
 
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
