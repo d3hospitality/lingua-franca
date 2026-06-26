@@ -105,20 +105,41 @@ if [ "$watch_rc" -eq 124 ]; then
   exit 2
 fi
 
-# `gh run watch` can return a beat before the run's conclusion and logs are
-# queryable. Poll briefly so a fast machine doesn't misread a green run as unknown.
-conclusion=""; log=""
-for _ in 1 2 3 4 5 6; do
-  conclusion="$(gh run view "$run_id" -R "$REPO" --json conclusion,status --jq '.conclusion // .status' 2>/dev/null)"
+# `gh run watch --exit-status` already told us the run's terminal state: rc 0 =
+# success, nonzero (and not 124) = the run failed. Seed the conclusion from that
+# so a slow/blipping `gh run view` can't make a known-good run read as "unknown"
+# and trip the catch-all FAIL below. (watch_rc 124 was already handled above.)
+conclusion=""
+[ "$watch_rc" -eq 0 ] && conclusion="success"
+
+# Logs can lag the run's conclusion by several seconds on GitHub's side. Poll
+# until we actually have a NON-EMPTY log — an empty log means "couldn't read it",
+# which is INCONCLUSIVE, not proof the gate failed. Refresh the conclusion too,
+# but never let a transient empty read clobber the watch-derived value.
+log=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  c="$(gh run view "$run_id" -R "$REPO" --json conclusion,status --jq '.conclusion // .status' 2>/dev/null)"
+  [ -n "$c" ] && conclusion="$c"
   log="$(gh run view "$run_id" -R "$REPO" --log 2>/dev/null)"
   if [ -n "$log" ] && { [ "$conclusion" = "success" ] || [ "$conclusion" = "failure" ]; }; then
     break
   fi
-  sleep 2
+  sleep 3
 done
 
 echo ""
 bold "  run $run_id concluded: ${conclusion:-unknown}"
+
+# Guard the false-negative: if we never managed to read the log, we CANNOT tell a
+# real pass from a neutered one — that is "inconclusive" (exit 2: just re-run),
+# NOT a gate failure (exit 1: roll back). Telling the operator to roll back a
+# healthy token because a log fetch blipped is the exact failure this script
+# exists to prevent — so it must not commit that error itself.
+if [ -z "$log" ]; then
+  yellow "  SKIP  run $run_id concluded '${conclusion:-unknown}' but its log could not be read (transient API / log lag)."
+  yellow "        Inconclusive — do NOT roll back. Re-run:  ./scripts/confirm-rotation.sh --latest"
+  exit 2
+fi
 
 # The decisive check: did the gate REALLY verify, or did it neutral-pass?
 if printf '%s' "$log" | grep -qF "$PASS_LINE"; then

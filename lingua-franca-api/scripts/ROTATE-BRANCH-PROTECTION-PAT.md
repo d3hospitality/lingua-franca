@@ -29,6 +29,37 @@ Same audit result, a fraction of the exposure. Least privilege.
 
 ---
 
+## Fast path — the guided wizard (recommended)
+
+One command collapses steps 1–4 into a single guided flow. It prints the exact
+field values, opens the mint page, then — reusing the one token you paste —
+pre-flights it, stores it only if it genuinely reads protection, and confirms the
+gate really re-verifies (by reading the audit log, not just its conclusion):
+
+```bash
+cd lingua-franca-api
+./scripts/mint-branch-protection-pat.sh
+```
+
+The only thing it can't do for you is the mint itself — that's the irreducible
+human action (GitHub mints fine-grained PATs only behind a web-UI consent click).
+You click **Generate**, copy, and paste; the wizard does the rest and rolls back
+guidance if anything fails. Prefer the manual steps below if you want to inspect
+each stage by hand.
+
+Before it opens the mint page, the wizard runs the **pre-mint readiness gate**,
+which proves every prerequisite *except* the human mint is green (you're an admin,
+the current credential reads protection so rollback is live, the audit workflow
+exists, every chained script is present) — so a perishable fine-grained token is
+never minted-then-wasted on a missing precondition. Run it standalone any time:
+
+```bash
+cd lingua-franca-api
+./scripts/preflight-mint-readiness.sh   # exit 0 = READY to mint; 1 = fix first; 2 = gh missing/unauth
+```
+
+---
+
 ## 1 — Mint the fine-grained PAT (GitHub UI, ~2 min)
 
 1. <https://github.com/settings/personal-access-tokens/new>
@@ -102,6 +133,29 @@ gh run view -R d3hospitality/lingua-franca \
 Expect the line `PASS  'check-alias-guard' is a required status check`. The audit
 also runs daily on schedule.
 
+## 5 — Retire the broad bootstrap token (only when provably safe)
+
+The bootstrap token (a broad `gh auth token`) stays in place until the
+fine-grained PAT is **proven** to be the gate's credential — retiring it any
+earlier silently strands the audit (it falls to the exit-2 neutral warning and
+verifies nothing). Don't eyeball this; run the gate:
+
+```bash
+./scripts/retire-bootstrap-token.sh          # kind-check + live audit, then exact retire steps
+./scripts/retire-bootstrap-token.sh --check  # readiness only (no audit dispatch)
+```
+
+It refuses (**exit 1**) unless BOTH hold:
+1. the repo variable `BRANCH_PROTECTION_PAT_KIND` is `fine-grained` — stamped
+   automatically by `set-branch-protection-pat.sh` from the stored token's prefix,
+   so it can't lie about which token the secret holds; and
+2. a fresh `branch-protection-audit` really re-verifies the gate now (via
+   `confirm-rotation.sh`, log-inspected, not just the conclusion).
+
+Only then does it print the precise, token-type-aware revoke steps. It never
+revokes anything itself — the irreducible human click at
+<https://github.com/settings/tokens> is all that remains.
+
 ---
 
 ## Rollback
@@ -117,7 +171,9 @@ Then mint a fresh fine-grained PAT and retry from step 1.
 
 ## Reference
 
+- Guided wizard (steps 1–4 in one command): [`mint-branch-protection-pat.sh`](./mint-branch-protection-pat.sh)
 - Storer / pre-flight: [`set-branch-protection-pat.sh`](./set-branch-protection-pat.sh)
 - Step-4 confirmer (dispatch + assert real PASS): [`confirm-rotation.sh`](./confirm-rotation.sh)
+- Step-5 safe-retire gate (kind-check + live audit, then exact revoke steps): [`retire-bootstrap-token.sh`](./retire-bootstrap-token.sh)
 - Gate assertion run by the workflow: [`check-branch-protection.sh`](./check-branch-protection.sh)
 - Workflow: [`../../.github/workflows/branch-protection-audit.yml`](../../.github/workflows/branch-protection-audit.yml)
