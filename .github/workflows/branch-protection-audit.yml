@@ -1,15 +1,19 @@
-# Daily audit that the required status checks are STILL required on main:
-#   • check-alias-guard — alias-guard YAML/topology gate
-#   • check-fixture     — offline fixture-integrity gate (fixture-check.yml)
+# Daily audit that the merge gate on main is STILL live — in BOTH dimensions:
 #
-# The topology guard (check-trigger-topology.sh, run by alias-guard-check.yml)
-# locks the workflow YAML so those jobs keep firing once per PR. It is blind,
-# though, to branch protection: if either context is silently dropped from main's
-# required status contexts, the job still runs green but no longer BLOCKS merges.
-# Nothing in-repo catches that — reading branch protection needs admin rights the
-# per-PR GITHUB_TOKEN doesn't have. This scheduled job carries a PAT (secret
-# BRANCH_PROTECTION_PAT) with admin:repo read and asserts both gates are live
-# every day, surfacing a silently-dropped required check within 24h.
+#   1. CONFIGURATION (job: audit-branch-protection) — the required contexts
+#      check-alias-guard + check-fixture are still LISTED in main's branch
+#      protection. Needs admin read (PAT secret BRANCH_PROTECTION_PAT).
+#   2. BEHAVIOUR (job: audit-merge-gate) — the merge button on every OPEN PR
+#      actually HONOURS those contexts: no PR is CLEAN-while-red, and no required
+#      check has silently stopped running. Needs only the default GITHUB_TOKEN.
+#
+# Why both: the topology guard (check-trigger-topology.sh, run by
+# alias-guard-check.yml) locks the workflow YAML so the jobs keep firing once per
+# PR, but it is blind to branch protection AND to live merge state. A context can
+# be silently dropped from main's required list (job 1 catches that), OR the merge
+# button can go CLEAN while a required check is red / absent (job 2 catches that)
+# — the config being correct does not prove the gate fires. Running both daily
+# surfaces a silently-dead gate, in either dimension, within 24h.
 name: branch-protection-audit
 
 on:
@@ -25,6 +29,8 @@ on:
       - main
     paths:
       - 'lingua-franca-api/scripts/check-branch-protection.sh'
+      - 'lingua-franca-api/scripts/check-merge-gate.sh'
+      - 'lingua-franca-api/scripts/check-merge-gate-all.sh'
       - '.github/workflows/branch-protection-audit.yml'
 
 jobs:
@@ -48,6 +54,36 @@ jobs:
           rc=$?
           if [ "$rc" -eq 2 ]; then
             echo "::warning title=branch-protection-audit::Inconclusive (exit 2) — likely BRANCH_PROTECTION_PAT secret is unset or lacks admin:repo read. Gate NOT verified."
+            exit 0
+          fi
+          exit $rc
+
+  # BEHAVIOURAL half: sweep every OPEN PR and assert the merge button actually
+  # honours the required checks (no CLEAN-while-red, no required check that quietly
+  # stopped running). Uses only the default GITHUB_TOKEN — reading PR merge state
+  # needs no admin rights — so unlike job 1 above it can never be inconclusive for
+  # lack of a PAT. Runs independently of audit-branch-protection so a failure in
+  # one dimension still surfaces the other.
+  audit-merge-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # exit 0 = every open PR's gate is consistent (or no open PRs) ·
+      # exit 1 = a DEAD/defective gate on some PR (FAIL the job — investigate now) ·
+      # exit 2 = inconclusive (gh/API blip) → neutral warning, don't page as a regression.
+      - name: Sweep all open PRs — assert the merge button honours every required check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          bash scripts/check-merge-gate-all.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=audit-merge-gate::Inconclusive (exit 2) — gh/API was unreachable or unauthenticated. Behavioural gate NOT verified this run."
             exit 0
           fi
           exit $rc
