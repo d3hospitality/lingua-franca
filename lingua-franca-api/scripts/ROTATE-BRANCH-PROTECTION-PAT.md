@@ -72,13 +72,35 @@ an exit-2 warning.
 ## 4 — Confirm the gate still verifies with the new token
 
 ```bash
-gh workflow run branch-protection-audit -R d3hospitality/lingua-franca
-# wait ~30s, then:
-gh run list -R d3hospitality/lingua-franca --workflow branch-protection-audit -L 1
+cd lingua-franca-api
+./scripts/confirm-rotation.sh
 ```
 
-Expect conclusion **success** and, in the log, `PASS 'check-alias-guard' is a
-required status check`. The audit also runs daily on schedule.
+This dispatches `branch-protection-audit`, waits for the fresh run, and asserts
+it **really** verified the gate — exit 0 only if the log carries
+`PASS  'check-alias-guard' is a required status check`.
+
+> **Why not just check `conclusion: success`?** Because a degraded token doesn't
+> turn the run red. When the stored PAT can't read protection,
+> `check-branch-protection.sh` exits 2, and the workflow deliberately maps exit 2
+> → exit 0 with a `::warning` (a missing secret must not page as a real
+> regression). So a *neutered* token still shows `conclusion: success`. Eyeballing
+> the conclusion can't tell a real verification from a silent neutral-pass — the
+> exact failure this whole rotation guards against. `confirm-rotation.sh` reads the
+> log and **exits 1** on a neutral exit-2 warning, telling you to roll back.
+
+Manual fallback if you prefer to inspect by hand:
+
+```bash
+gh workflow run branch-protection-audit -R d3hospitality/lingua-franca
+# wait ~30s, then read the LOG (not just the conclusion):
+gh run view -R d3hospitality/lingua-franca \
+  "$(gh run list -R d3hospitality/lingua-franca --workflow branch-protection-audit -L 1 --json databaseId --jq '.[0].databaseId')" --log \
+  | grep "is a required status check"
+```
+
+Expect the line `PASS  'check-alias-guard' is a required status check`. The audit
+also runs daily on schedule.
 
 ---
 
@@ -96,5 +118,6 @@ Then mint a fresh fine-grained PAT and retry from step 1.
 ## Reference
 
 - Storer / pre-flight: [`set-branch-protection-pat.sh`](./set-branch-protection-pat.sh)
+- Step-4 confirmer (dispatch + assert real PASS): [`confirm-rotation.sh`](./confirm-rotation.sh)
 - Gate assertion run by the workflow: [`check-branch-protection.sh`](./check-branch-protection.sh)
 - Workflow: [`../../.github/workflows/branch-protection-audit.yml`](../../.github/workflows/branch-protection-audit.yml)
