@@ -13,8 +13,12 @@
 #
 # Two layers:
 #   [1] STATIC  — grep the workflow YAML for the loud-fail branch (always runs).
-#   [2] DYNAMIC — extract the step's shell body and execute it with a simulated
-#                 prod-deployed dispatch + empty token; assert it exits non-zero.
+#   [2] DYNAMIC — extract the REAL "Assert alias serves the dispatched build" step
+#                 body straight out of the YAML and `source` it in a subshell with
+#                 a simulated prod-deployed dispatch + empty token; assert it exits
+#                 non-zero. Running the actual step body (not a hand-written mirror)
+#                 means an `exit 1`→`exit 0` flip that keeps the `::error::` string
+#                 — which the static grep [1] would still pass — is caught here.
 #
 # Usage:  ./scripts/check-alias-guard.sh
 # Exit:   0 = guard intact (fails loudly on lapsed secret), 1 = guard is broken.
@@ -49,19 +53,54 @@ else
 fi
 echo ""
 
-# ── 2. DYNAMIC: simulate prod-deployed + empty token → expect non-zero exit ───
-# Mirror the guard's branch logic exactly (kept in sync with the YAML body).
-# This catches a revert that keeps the env var but removes/inverts the exit 1.
-echo "[2] Dynamic: simulate prod-deployed dispatch with empty VERCEL_TOKEN"
+# ── 2. DYNAMIC: run the REAL step body with a simulated dispatch ──────────────
+# Extract the literal shell body of the "Assert alias serves the dispatched
+# build" step from the YAML and execute it — no hand-written mirror to drift.
+# The three branches exercised below (no deploy_dpl / lapsed token on a
+# repository_dispatch / lapsed token on a manual run) all return BEFORE the step
+# reaches `verify-alias.sh`, so no Vercel CLI, token, or network is needed.
+echo "[2] Dynamic: run the real step body with a simulated prod-deployed dispatch"
+
+# Pull the block-scalar body of the named step out of the workflow YAML.
+# runind = leading spaces before `run:`; body lines are indented further. The
+# block ends at the first non-blank line indented no deeper than `run:` (the
+# next step or comment). Bash ignores the carried-over leading indentation, so
+# the lines source verbatim with no dedent.
+extract_step_body() {
+  awk '
+    index($0, "- name: Assert alias serves the dispatched build") { found=1 }
+    found && match($0, /^[ ]*run: \|/) { runind = index($0, "run") - 1; inrun = 1; next }
+    inrun {
+      if ($0 ~ /^[ \t]*$/) { print ""; next }
+      n = match($0, /[^ ]/) - 1
+      if (n <= runind) { inrun = 0; found = 0; next }
+      print
+    }
+  ' "$WF"
+}
+
+BODY_FILE="$(mktemp)"
+trap 'rm -f "$BODY_FILE"' EXIT
+extract_step_body > "$BODY_FILE"
+
+if [ ! -s "$BODY_FILE" ]; then
+  red "  FAIL  could not extract the step body from $WF — the step name may have changed; this dynamic check is now blind. Re-sync extract_step_body."
+  RC=1
+fi
+
+# Source the extracted body in a subshell with the simulated dispatch env. The
+# step's `exit N` becomes the subshell's exit code. GITHUB_STEP_SUMMARY → a temp
+# file so the step's `note()` appends don't pollute anything; URL is a harmless
+# placeholder only read on the (unreached) token-present path.
 sim() {
   local DEPLOY_DPL="$1" VERCEL_TOKEN="$2" EVENT_NAME="$3"
-  note() { :; }
-  if [ -z "$DEPLOY_DPL" ]; then return 0; fi
-  if [ -z "$VERCEL_TOKEN" ]; then
-    if [ "$EVENT_NAME" = "repository_dispatch" ]; then return 1; fi
-    return 0
-  fi
-  return 0
+  local URL="https://example.invalid" GITHUB_STEP_SUMMARY
+  GITHUB_STEP_SUMMARY="$(mktemp)"
+  export DEPLOY_DPL VERCEL_TOKEN EVENT_NAME URL GITHUB_STEP_SUMMARY
+  ( source "$BODY_FILE" ) >/dev/null 2>&1
+  local rc=$?
+  rm -f "$GITHUB_STEP_SUMMARY"
+  return $rc
 }
 
 # Real deploy, secret lapsed → MUST fail loudly.
