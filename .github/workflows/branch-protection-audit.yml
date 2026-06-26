@@ -1,0 +1,51 @@
+# Daily audit that `check-alias-guard` is STILL a required status check on main.
+#
+# The topology guard (check-trigger-topology.sh, run by alias-guard-check.yml)
+# locks the workflow YAML so the alias-guard job keeps firing once per PR. It is
+# blind, though, to branch protection: if `check-alias-guard` is silently dropped
+# from main's required status contexts, the job still runs green but no longer
+# BLOCKS merges. Nothing in-repo catches that — reading branch protection needs
+# admin rights the per-PR GITHUB_TOKEN doesn't have. This scheduled job carries a
+# PAT (secret BRANCH_PROTECTION_PAT) with admin:repo read and asserts the gate is
+# live every day, surfacing a silently-dropped required check within 24h.
+name: branch-protection-audit
+
+on:
+  schedule:
+    # 13:17 UTC daily — off the top of the hour to dodge Actions cron congestion.
+    - cron: '17 13 * * *'
+  workflow_dispatch:
+  # Scoped push so this workflow INDEXES (a dispatch/schedule-only workflow won't
+  # register until a push/PR associates it — memory: github-dispatch-only-workflow-
+  # registration) and so edits to the guard itself are smoke-tested on landing.
+  push:
+    branches:
+      - main
+    paths:
+      - 'lingua-franca-api/scripts/check-branch-protection.sh'
+      - '.github/workflows/branch-protection-audit.yml'
+
+jobs:
+  audit-branch-protection:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lingua-franca-api
+    steps:
+      - uses: actions/checkout@v4
+
+      # exit 0 = gate live (pass) · exit 1 = context dropped (FAIL the job) ·
+      # exit 2 = inconclusive, e.g. PAT secret absent (neutral warning, don't fail
+      # — a missing secret or API blip must not page as a real regression).
+      - name: Assert check-alias-guard is a required status check
+        env:
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_PAT }}
+        run: |
+          set +e
+          bash scripts/check-branch-protection.sh
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning title=branch-protection-audit::Inconclusive (exit 2) — likely BRANCH_PROTECTION_PAT secret is unset or lacks admin:repo read. Gate NOT verified."
+            exit 0
+          fi
+          exit $rc
