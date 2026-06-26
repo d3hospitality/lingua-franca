@@ -6,7 +6,10 @@
 #   that must run in a specific order, each with its own 3-way exit code:
 #     1. assert-cron-proof-armed.sh        — is the NEXT tick going to capture? (preflight)
 #     2. check-proof-verdict-contract.sh   — does capture still read what the producer writes?
-#     3. capture-cron-proof.sh             — is the genuine N-job exit-0 proof captured yet?
+#     3. record-cron-proof.sh              — is the genuine N-job exit-0 proof captured yet?
+#                                            (durable wrapper over capture-cron-proof.sh — on a
+#                                             win it ALSO appends the WIN block to a file so it
+#                                             survives terminal scrollback; exit codes identical)
 #   Run out of order, or with #3's green verdict TRUSTED while #2's producer↔consumer
 #   handshake has silently drifted, the "proof" is worthless. A human (or relay agent)
 #   landing at the 13:30Z tick after a 24h wait should not have to re-derive that
@@ -21,6 +24,8 @@
 #      If that handshake drifted, capture's exit 0 is a false pass. So the contract MUST
 #      hold before we are willing to accept a green capture as proof.
 #   C. CAPTURE last     — only now is its verdict trustworthy. exit 0 ⇒ mission CLOSED.
+#                         Uses record-cron-proof.sh (not the print-only capture) so the WIN
+#                         block is durably written to CRON-PROOF-CAPTURED.md, not just echoed.
 #
 # Usage:   ./scripts/close-cron-proof-mission.sh   (run from a clone checked out on main,
 #                                                    AFTER the 13:30Z tick for the win path)
@@ -73,16 +78,19 @@ green "[B] handshake intact — capture's verdict is trustworthy."
 echo ""
 
 # ── Gate C: CAPTURE — is the genuine unattended N-job exit-0 proof captured? ──
-bold "[C] capture    ── capture-cron-proof.sh"
+# Run via record-cron-proof.sh (durable wrapper) so a win is persisted to disk, not
+# just printed — exit codes mirror capture-cron-proof.sh exactly (0/1/2).
+bold "[C] capture    ── record-cron-proof.sh (durable wrapper over capture-cron-proof.sh)"
 rule
-"$SCRIPT_DIR/capture-cron-proof.sh"; C=$?
+"$SCRIPT_DIR/record-cron-proof.sh"; C=$?
 rule
 echo ""
 case "$C" in
   0) green "════════════════════════════════════════════════════════════════"
      green " MISSION CLOSED — genuine UNATTENDED N-job exit-0 cron proof captured."
      green "════════════════════════════════════════════════════════════════"
-     bold  " Next: paste the record block above into proof-armed-bidirectional-jobs-check.md"
+     bold  " The WIN block was durably appended to CRON-PROOF-CAPTURED.md (survives scrollback)."
+     bold  " Next: paste that record block into proof-armed-bidirectional-jobs-check.md"
      bold  "       and report the locked cron-proof mission as CLOSED."
      exit 0 ;;
   2) yellow "NOT YET (exit 2): apparatus ARMED + handshake INTACT, but the proof is still PENDING."

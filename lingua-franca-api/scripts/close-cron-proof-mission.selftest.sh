@@ -48,7 +48,7 @@ EOF
 #!/usr/bin/env bash
 printf 'B' >> "$STUB_ORDER"; exit "${STUB_B:-0}"
 EOF
-  cat > "$work/capture-cron-proof.sh"           <<'EOF'
+  cat > "$work/record-cron-proof.sh"            <<'EOF'
 #!/usr/bin/env bash
 printf 'C' >> "$STUB_ORDER"; exit "${STUB_C:-0}"
 EOF
